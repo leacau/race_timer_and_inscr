@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { AppProvider } from "@/context/app-context";
 import { cn } from "@/lib/utils";
 import { SpeedInsights } from "@vercel/speed-insights/next";
+import { SidebarProvider } from "@/components/ui/sidebar";
 
 export const metadata: Metadata = {
   title: "RaceTimer Pro",
@@ -28,7 +29,9 @@ export default function RootLayout({
       </head>
       <body className={cn("font-body antialiased", "min-h-screen bg-background font-sans")}>
         <AppProvider>
-          <AppShell>{children}</AppShell>
+          <SidebarProvider>
+            <AppShell>{children}</AppShell>
+          </SidebarProvider>
         </AppProvider>
         <Toaster />
         <SpeedInsights />
