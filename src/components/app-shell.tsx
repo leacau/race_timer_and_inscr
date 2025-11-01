@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import {
-  SidebarProvider,
   Sidebar,
   SidebarHeader,
   SidebarContent,
@@ -114,7 +113,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   if (!isClient) {
     return null; // or a loading skeleton
   }
-
+  
   return (
     <>
       <Sidebar>
