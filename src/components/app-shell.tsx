@@ -105,7 +105,6 @@ function AppHeader() {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { isMobile } = useSidebar();
   const [isClient, setIsClient] = React.useState(false);
 
   React.useEffect(() => {
@@ -131,9 +130,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <SidebarMenu>
             {navItems.map((item) => (
               <SidebarMenuItem key={item.href}>
-                <Link href={item.href} legacyBehavior passHref>
+                <Link href={item.href}>
                   <SidebarMenuButton
-                    as="a"
                     isActive={pathname === item.href}
                     tooltip={item.label}
                   >
