@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { AppShell } from "@/components/app-shell";
-import { Toaster } from "@/components/ui/toaster";
 import { AppProvider } from "@/context/app-context";
 import { cn } from "@/lib/utils";
 import { SpeedInsights } from "@vercel/speed-insights/next";
@@ -30,7 +29,6 @@ export default function RootLayout({
         <AppProvider>
           <AppShell>{children}</AppShell>
         </AppProvider>
-        <Toaster />
         <SpeedInsights />
       </body>
     </html>
