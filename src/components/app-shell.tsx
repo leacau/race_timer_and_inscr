@@ -106,8 +106,13 @@ function AppHeader() {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { isMobile } = useSidebar();
+  const [isClient, setIsClient] = React.useState(false);
 
-  if (isMobile === undefined) {
+  React.useEffect(() => {
+    setIsClient(true);
+  }, []);
+
+  if (!isClient) {
     return null; // or a loading skeleton
   }
 
@@ -126,16 +131,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <SidebarMenu>
             {navItems.map((item) => (
               <SidebarMenuItem key={item.href}>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname === item.href}
-                  tooltip={item.label}
-                >
-                  <Link href={item.href}>
+                <Link href={item.href} legacyBehavior passHref>
+                  <SidebarMenuButton
+                    as="a"
+                    isActive={pathname === item.href}
+                    tooltip={item.label}
+                  >
                     <item.icon />
                     <span>{item.label}</span>
-                  </Link>
-                </SidebarMenuButton>
+                  </SidebarMenuButton>
+                </Link>
               </SidebarMenuItem>
             ))}
           </SidebarMenu>
