@@ -115,7 +115,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
   
   return (
-    <>
+    <SidebarProvider>
       <Sidebar>
         <SidebarHeader>
           <div className="flex items-center gap-2">
@@ -150,6 +150,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <AppHeader />
         <main className="flex-1 overflow-y-auto p-4 md:p-6">{children}</main>
       </SidebarInset>
-    </>
+    </SidebarProvider>
   );
 }
