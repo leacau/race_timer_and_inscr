@@ -4,10 +4,11 @@ import { AppShell } from "@/components/app-shell";
 import { AppProvider } from "@/context/app-context";
 import { cn } from "@/lib/utils";
 import { SpeedInsights } from "@vercel/speed-insights/next";
+import { SidebarProvider } from "@/components/ui/sidebar";
 
 export const metadata: Metadata = {
   title: "RaceTimer Pro",
-  description: "The ultimate solution for timing running races.",
+  description: "La solución definitiva para cronometrar carreras.",
 };
 
 export default function RootLayout({
@@ -16,7 +17,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="es" suppressHydrationWarning>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
@@ -27,7 +28,9 @@ export default function RootLayout({
       </head>
       <body className={cn("font-body antialiased", "min-h-screen bg-background font-sans")}>
         <AppProvider>
-          <AppShell>{children}</AppShell>
+            <SidebarProvider>
+              <AppShell>{children}</AppShell>
+            </SidebarProvider>
         </AppProvider>
         <SpeedInsights />
       </body>

@@ -8,9 +8,9 @@ let participants: Participant[] = [
 ];
 
 let categories: Category[] = [
-  { id: 'cat1', name: 'Male 30-39 10k', minAge: 30, maxAge: 39, gender: 'Male', distance: '10k' },
-  { id: 'cat2', name: 'Female 30-39 10k', minAge: 30, maxAge: 39, gender: 'Female', distance: '10k' },
-  { id: 'cat3', name: 'Male 18-29 5k', minAge: 18, maxAge: 29, gender: 'Male', distance: '5k' },
+  { id: 'cat1', name: 'Masculino 30-39 10k', minAge: 30, maxAge: 39, gender: 'Male', distance: '10k' },
+  { id: 'cat2', name: 'Femenino 30-39 10k', minAge: 30, maxAge: 39, gender: 'Female', distance: '10k' },
+  { id: 'cat3', name: 'Masculino 18-29 5k', minAge: 18, maxAge: 29, gender: 'Male', distance: '5k' },
 ];
 
 // In a real app, you would use a persistent database.
@@ -25,12 +25,19 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export async function getParticipants(): Promise<Participant[]> {
   await delay(100);
-  return db.participants;
+  // Sort participants by surname, then name
+  return [...db.participants].sort((a, b) => {
+    if (a.surname < b.surname) return -1;
+    if (a.surname > b.surname) return 1;
+    if (a.name < b.name) return -1;
+    if (a.name > b.name) return 1;
+    return 0;
+  });
 }
 
 export async function getCategories(): Promise<Category[]> {
   await delay(100);
-  return db.categories;
+  return [...db.categories].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export async function addParticipant(participant: ParticipantInput & { categoryId?: string }): Promise<Participant> {

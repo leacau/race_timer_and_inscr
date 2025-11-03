@@ -44,8 +44,8 @@ import {
 import { Toaster } from "./ui/toaster";
 
 const navItems = [
-  { href: "/", icon: Timer, label: "Timer" },
-  { href: "/categories", icon: LayoutGrid, label: "Categories" },
+  { href: "/", icon: Timer, label: "Cronómetro" },
+  { href: "/categories", icon: LayoutGrid, label: "Categorías" },
 ];
 
 function AppHeader() {
@@ -53,11 +53,11 @@ function AppHeader() {
   const { isMobile } = useSidebar();
 
   const pageTitles: { [key: string]: string } = {
-    "/": "Participants Timer",
-    "/categories": "Manage Categories",
+    "/": "Cronómetro de Participantes",
+    "/categories": "Administrar Categorías",
   };
   const pathname = usePathname();
-  const title = pageTitles[pathname] ?? "Dashboard";
+  const title = pageTitles[pathname] ?? "Panel";
 
   return (
     <header className="flex h-16 items-center justify-between gap-4 border-b bg-card px-4 md:px-6">
@@ -68,7 +68,7 @@ function AppHeader() {
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2">
           <Label htmlFor="role-switch" className="text-sm font-medium">
-            {role === "admin" ? "Admin" : "Viewer"}
+            {role === "admin" ? "Administrador" : "Espectador"}
           </Label>
           <Switch
             id="role-switch"
@@ -87,15 +87,15 @@ function AppHeader() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuLabel>My Account</DropdownMenuLabel>
+            <DropdownMenuLabel>Mi Cuenta</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem>
               <Settings className="mr-2 h-4 w-4" />
-              <span>Settings</span>
+              <span>Configuración</span>
             </DropdownMenuItem>
             <DropdownMenuItem>
               <LogOut className="mr-2 h-4 w-4" />
-              <span>Log out</span>
+              <span>Cerrar Sesión</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -117,42 +117,42 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
   
   return (
-    <SidebarProvider>
-      <Sidebar>
-        <SidebarHeader>
-          <div className="flex items-center gap-2">
-            <RaceTimerProLogo className="size-8" />
-            <span className="text-lg font-semibold text-sidebar-foreground">
-              RaceTimer Pro
-            </span>
-          </div>
-        </SidebarHeader>
-        <SidebarContent>
-          <SidebarMenu>
-            {navItems.map((item) => (
-              <SidebarMenuItem key={item.href}>
-                <Link href={item.href}>
-                  <SidebarMenuButton
-                    isActive={pathname === item.href}
-                    tooltip={item.label}
-                  >
-                    <item.icon />
-                    <span>{item.label}</span>
-                  </SidebarMenuButton>
-                </Link>
-              </SidebarMenuItem>
-            ))}
-          </SidebarMenu>
-        </SidebarContent>
-        <SidebarFooter>
-          {/* Footer content if any */}
-        </SidebarFooter>
-      </Sidebar>
-      <SidebarInset>
-        <AppHeader />
-        <main className="flex-1 overflow-y-auto p-4 md:p-6">{children}</main>
-      </SidebarInset>
-      <Toaster />
-    </SidebarProvider>
+      <>
+        <Sidebar>
+          <SidebarHeader>
+            <div className="flex items-center gap-2">
+              <RaceTimerProLogo className="size-8" />
+              <span className="text-lg font-semibold text-sidebar-foreground">
+                RaceTimer Pro
+              </span>
+            </div>
+          </SidebarHeader>
+          <SidebarContent>
+            <SidebarMenu>
+              {navItems.map((item) => (
+                <SidebarMenuItem key={item.href}>
+                  <Link href={item.href}>
+                    <SidebarMenuButton
+                      isActive={pathname === item.href}
+                      tooltip={item.label}
+                    >
+                      <item.icon />
+                      <span>{item.label}</span>
+                    </SidebarMenuButton>
+                  </Link>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarContent>
+          <SidebarFooter>
+            {/* Footer content if any */}
+          </SidebarFooter>
+        </Sidebar>
+        <SidebarInset>
+          <AppHeader />
+          <main className="flex-1 overflow-y-auto p-4 md:p-6">{children}</main>
+        </SidebarInset>
+        <Toaster />
+      </>
   );
 }
