@@ -1,10 +1,13 @@
+export type AgeCalculationMethod = 'raceDay' | 'endOfYear';
+
 export type Participant = {
   id: string;
   name: string;
   surname: string;
   dni: string;
   gender: 'Male' | 'Female' | 'Other';
-  birthDate: string; // YYYY-MM-DD
+  birthDate?: string; // YYYY-MM-DD
+  age?: number;
   distance: '5k' | '10k' | '21k' | '42k';
   categoryId?: string;
   startTime?: number; // timestamp

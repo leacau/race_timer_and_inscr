@@ -1,23 +1,33 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
-import { differenceInYears } from "date-fns";
+import { differenceInYears, endOfYear } from "date-fns";
+import type { AgeCalculationMethod } from "./types";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-export function calculateAge(birthDate: string): number {
-  if (!birthDate) return 0;
+export function calculateAge(birthDate: string | undefined | null, raceDate: Date = new Date(), method: AgeCalculationMethod = 'raceDay'): number | null {
+  if (!birthDate) return null;
   try {
-    // Handle Excel date serial numbers
+    const referenceDate = method === 'endOfYear' ? endOfYear(raceDate) : raceDate;
+    
+    // Handle Excel date serial numbers which can sometimes be parsed as numbers
     if (typeof birthDate === 'number') {
-      return differenceInYears(new Date(), new Date(Date.UTC(1900, 0, birthDate - 1)));
+      const excelEpoch = new Date(Date.UTC(1900, 0, birthDate - 1));
+      return differenceInYears(referenceDate, excelEpoch);
     }
-    return differenceInYears(new Date(), new Date(birthDate));
+    
+    const bd = new Date(birthDate);
+    // Check for invalid date
+    if (isNaN(bd.getTime())) return null;
+
+    return differenceInYears(referenceDate, bd);
   } catch (error) {
-    return 0;
+    return null;
   }
 }
+
 
 export function formatElapsedTime(ms: number): string {
   if (ms < 0) ms = 0;

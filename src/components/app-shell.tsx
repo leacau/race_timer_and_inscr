@@ -22,6 +22,7 @@ import {
   Eye,
   LogOut,
   LayoutGrid,
+  CalendarIcon,
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
@@ -42,6 +43,16 @@ import {
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { Toaster } from "./ui/toaster";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { Calendar } from "./ui/calendar";
+import { format } from "date-fns";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
 
 const navItems = [
   { href: "/", icon: Timer, label: "Cronómetro" },
@@ -49,7 +60,7 @@ const navItems = [
 ];
 
 function AppHeader() {
-  const { role, setRole } = React.useContext(AppContext);
+  const { role, setRole, raceDate, setRaceDate, ageCalculationMethod, setAgeCalculationMethod } = React.useContext(AppContext);
   const { isMobile } = useSidebar();
 
   const pageTitles: { [key: string]: string } = {
@@ -66,6 +77,53 @@ function AppHeader() {
         <h1 className="text-lg font-semibold tracking-tight">{title}</h1>
       </div>
       <div className="flex items-center gap-4">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm">
+              <Settings className="mr-2 h-4 w-4" />
+              <span>Ajustes de Carrera</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-80 p-4">
+            <div className="space-y-4">
+              <div>
+                  <Label>Fecha de la Carrera</Label>
+                  <Popover>
+                      <PopoverTrigger asChild>
+                          <Button
+                              variant={"outline"}
+                              className={cn("w-full justify-start text-left font-normal", !raceDate && "text-muted-foreground")}
+                          >
+                              <CalendarIcon className="mr-2 h-4 w-4" />
+                              {raceDate ? format(raceDate, "PPP") : <span>Elige una fecha</span>}
+                          </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0">
+                          <Calendar
+                              mode="single"
+                              selected={raceDate}
+                              onSelect={setRaceDate}
+                              initialFocus
+                          />
+                      </PopoverContent>
+                  </Popover>
+              </div>
+              <div>
+                  <Label>Calcular Edad Al</Label>
+                  <Select value={ageCalculationMethod} onValueChange={(value) => setAgeCalculationMethod(value as 'raceDay' | 'endOfYear')}>
+                      <SelectTrigger>
+                          <SelectValue placeholder="Método de cálculo" />
+                      </SelectTrigger>
+                      <SelectContent>
+                          <SelectItem value="raceDay">Día de la carrera</SelectItem>
+                          <SelectItem value="endOfYear">Final del año</SelectItem>
+                      </SelectContent>
+                  </Select>
+              </div>
+            </div>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
         <div className="flex items-center gap-2">
           <Label htmlFor="role-switch" className="text-sm font-medium">
             {role === "admin" ? "Administrador" : "Espectador"}

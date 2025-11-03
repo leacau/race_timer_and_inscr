@@ -16,11 +16,13 @@ import {
   updateParticipantTime as dbUpdateParticipantTime,
   bulkDeleteCategories as dbBulkDeleteCategories
 } from "./data";
-import type { Participant, Category, ParticipantInput, CategoryInput } from "./types";
+import type { Participant, Category, ParticipantInput, CategoryInput, AgeCalculationMethod } from "./types";
 import { calculateAge, generateChipNumber } from "./utils";
 
-const assignCategory = (participant: Omit<Participant, "id" | "chipNumber">, categories: Category[]): string | undefined => {
-    const age = calculateAge(participant.birthDate);
+const assignCategory = (participant: Omit<Participant, "id" | "chipNumber">, categories: Category[], raceDate: Date, ageCalculationMethod: AgeCalculationMethod): string | undefined => {
+    const age = participant.age ?? calculateAge(participant.birthDate, raceDate, ageCalculationMethod);
+    if (age === null) return undefined;
+
     for (const category of categories) {
         if (
             participant.distance === category.distance &&
@@ -36,19 +38,21 @@ const assignCategory = (participant: Omit<Participant, "id" | "chipNumber">, cat
 
 
 // Participant Actions
-export async function addParticipant(participantData: ParticipantInput) {
+export async function addParticipant(participantData: ParticipantInput & { raceDate: Date, ageCalculationMethod: AgeCalculationMethod }) {
+    const { raceDate, ageCalculationMethod, ...pData } = participantData;
     const categories = await dbGetCategories();
-    const categoryId = assignCategory(participantData, categories);
-    const chipNumber = generateChipNumber(participantData.bibNumber);
-    await dbAddParticipant({ ...participantData, categoryId, chipNumber });
+    const categoryId = assignCategory(pData, categories, raceDate, ageCalculationMethod);
+    const chipNumber = generateChipNumber(pData.bibNumber);
+    await dbAddParticipant({ ...pData, categoryId, chipNumber });
     revalidatePath("/");
 }
 
-export async function updateParticipant(participant: Omit<Participant, 'chipNumber'>) {
+export async function updateParticipant(participant: Omit<Participant, 'chipNumber'> & { raceDate: Date, ageCalculationMethod: AgeCalculationMethod }) {
+    const { raceDate, ageCalculationMethod, ...pData } = participant;
     const categories = await dbGetCategories();
-    const categoryId = assignCategory(participant, categories);
-    const chipNumber = generateChipNumber(participant.bibNumber);
-    await dbUpdateParticipant({ ...participant, categoryId, chipNumber });
+    const categoryId = assignCategory(pData, categories, raceDate, ageCalculationMethod);
+    const chipNumber = generateChipNumber(pData.bibNumber);
+    await dbUpdateParticipant({ ...pData, categoryId, chipNumber });
     revalidatePath("/");
 }
 
@@ -160,24 +164,27 @@ const importParticipantSchema = z.object({
   name: z.string().min(1),
   surname: z.string().min(1),
   dni: z.string().min(1),
-  birthDate: z.string(), // We'll handle date conversion/validation separately
+  birthDate: z.string().optional(),
+  age: z.coerce.number().int().min(0).optional(),
   gender: z.enum(['Male', 'Female', 'Other']),
   distance: z.enum(['5k', '10k', '21k', '42k']),
   bibNumber: z.string().min(1),
   city: z.string().optional(),
   province: z.string().optional(),
   country: z.string().optional(),
+}).refine(data => !!data.birthDate || (data.age !== undefined && data.age >= 0), {
+  message: "Debe proporcionar la fecha de nacimiento o la edad para cada participante importado.",
 });
 
 
-export async function importParticipants(participants: z.infer<typeof importParticipantSchema>[]) {
+export async function importParticipants(participants: z.infer<typeof importParticipantSchema>[], raceDate: Date, ageCalculationMethod: AgeCalculationMethod) {
   const categories = await dbGetCategories();
   let count = 0;
   
   for (const p of participants) {
     try {
       const validatedParticipant = importParticipantSchema.parse(p);
-      const categoryId = assignCategory(validatedParticipant, categories);
+      const categoryId = assignCategory(validatedParticipant, categories, raceDate, ageCalculationMethod);
       const chipNumber = generateChipNumber(validatedParticipant.bibNumber);
 
       await dbAddParticipant({

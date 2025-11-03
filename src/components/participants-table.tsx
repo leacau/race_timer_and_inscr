@@ -75,13 +75,18 @@ const participantSchema = z.object({
   name: z.string().min(1, "El nombre es requerido"),
   surname: z.string().min(1, "El apellido es requerido"),
   dni: z.string().min(1, "El DNI/ID es requerido"),
-  birthDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Introduce la fecha en formato AAAA-MM-DD"),
+  birthDate: z.string().optional(),
+  age: z.coerce.number().int().min(0).optional(),
   gender: z.enum(["Male", "Female", "Other"]),
   distance: z.enum(["5k", "10k", "21k", "42k"]),
   city: z.string().optional(),
   province: z.string().optional(),
   country: z.string().optional(),
+}).refine(data => !!data.birthDate || (data.age !== undefined && data.age >= 0), {
+  message: "Debe proporcionar la fecha de nacimiento o la edad.",
+  path: ["birthDate"], // Show error on one of the fields
 });
+
 type ParticipantFormValues = z.infer<typeof participantSchema>;
 
 type ImportState = {
@@ -96,7 +101,8 @@ const systemFields = [
     { key: "name", label: "Nombre", required: true },
     { key: "surname", label: "Apellido", required: true },
     { key: "dni", label: "DNI/ID", required: true },
-    { key: "birthDate", label: "Fecha de Nacimiento", required: true },
+    { key: "birthDate", label: "Fecha de Nacimiento", required: false },
+    { key: "age", label: "Edad", required: false },
     { key: "gender", label: "Género", required: true },
     { key: "distance", label: "Distancia", required: true },
     { key: "city", label: "Ciudad", required: false },
@@ -106,7 +112,7 @@ const systemFields = [
 
 export function ParticipantsTable({ participants, categories }: { participants: Participant[]; categories: Category[] }) {
   const { toast } = useToast();
-  const { role } = useContext(AppContext);
+  const { role, raceDate, ageCalculationMethod } = useContext(AppContext);
   const isMobile = useIsMobile();
   const [timers, setTimers] = useState<TimerState>({});
   const [open, setOpen] = useState(false);
@@ -133,7 +139,8 @@ export function ParticipantsTable({ participants, categories }: { participants: 
       setEditingParticipant(participant);
       form.reset({
         ...participant,
-        birthDate: participant.birthDate ? new Date(participant.birthDate).toISOString().split('T')[0] : ''
+        birthDate: participant.birthDate ? new Date(participant.birthDate).toISOString().split('T')[0] : '',
+        age: participant.age
       });
     } else {
       setEditingParticipant(null);
@@ -144,11 +151,12 @@ export function ParticipantsTable({ participants, categories }: { participants: 
 
   const onSubmit = async (values: ParticipantFormValues) => {
     try {
+      const payload = { ...values, raceDate: raceDate, ageCalculationMethod };
       if (editingParticipant) {
-        await updateParticipant({ ...editingParticipant, ...values });
+        await updateParticipant({ ...editingParticipant, ...payload });
         toast({ title: "Participante Actualizado", description: "El participante ha sido actualizado correctamente." });
       } else {
-        await addParticipant(values);
+        await addParticipant(payload);
         toast({ title: "Participante Añadido", description: "El nuevo participante ha sido añadido correctamente." });
       }
       setOpen(false);
@@ -227,7 +235,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
     });
     
     try {
-        const result = await importParticipants(participantsToImport);
+        const result = await importParticipants(participantsToImport, raceDate, ageCalculationMethod);
         toast({
             title: "Importación Exitosa",
             description: `${result.count} participantes importados.`
@@ -299,7 +307,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
   const isAdmin = role === 'admin';
 
   const renderParticipantRow = (p: Participant) => {
-    const age = calculateAge(p.birthDate);
+    const age = p.age ?? calculateAge(p.birthDate, raceDate, ageCalculationMethod);
     const timer = timers[p.id];
     const isRunning = timer?.isRunning ?? false;
     
@@ -357,7 +365,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
   };
   
   const renderParticipantCard = (p: Participant) => {
-    const age = calculateAge(p.birthDate);
+    const age = p.age ?? calculateAge(p.birthDate, raceDate, ageCalculationMethod);
     const timer = timers[p.id];
     const isRunning = timer?.isRunning ?? false;
     return (
@@ -481,9 +489,23 @@ export function ParticipantsTable({ participants, categories }: { participants: 
               <FormField control={form.control} name="dni" render={({ field }) => (
                 <FormItem><FormLabel>DNI / ID</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
               )} />
-              <FormField control={form.control} name="birthDate" render={({ field }) => (
-                <FormItem><FormLabel>Fecha de Nacimiento</FormLabel><FormControl><Input type="date" {...field} /></FormControl><FormMessage /></FormItem>
-              )} />
+              
+              <div className="grid grid-cols-2 gap-4">
+                <FormField control={form.control} name="birthDate" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Fecha de Nacimiento</FormLabel>
+                    <FormControl><Input type="date" {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="age" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>o Edad</FormLabel>
+                    <FormControl><Input type="number" {...field} /></FormControl>
+                  </FormItem>
+                )} />
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <FormField control={form.control} name="gender" render={({ field }) => (
                   <FormItem>
