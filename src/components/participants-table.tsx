@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useEffect, useContext, useMemo, useRef } from "react";
@@ -47,6 +48,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
 import { MoreVertical, Play, Square, Edit, Trash2, Plus, Upload } from "lucide-react";
 import type { Participant, Category } from "@/lib/types";
 import { cn, calculateAge, formatElapsedTime } from "@/lib/utils";
@@ -96,7 +98,7 @@ const systemFields = [
     { key: "dni", label: "DNI/ID", required: true },
     { key: "birthDate", label: "Fecha de Nacimiento", required: true },
     { key: "gender", label: "Género", required: true },
-    { key_key: "distance", label: "Distancia", required: true },
+    { key: "distance", label: "Distancia", required: true },
     { key: "city", label: "Ciudad", required: false },
     { key: "province", label: "Provincia", required: false },
     { key: "country", label: "País", required: false },
@@ -129,7 +131,10 @@ export function ParticipantsTable({ participants, categories }: { participants: 
   const handleOpenDialog = (participant?: Participant) => {
     if (participant) {
       setEditingParticipant(participant);
-      form.reset(participant);
+      form.reset({
+        ...participant,
+        birthDate: participant.birthDate ? new Date(participant.birthDate).toISOString().split('T')[0] : ''
+      });
     } else {
       setEditingParticipant(null);
       form.reset({ name: "", surname: "", dni: "", birthDate: "", gender: "Male", distance: "5k", bibNumber: "" });
@@ -174,7 +179,6 @@ export function ParticipantsTable({ participants, categories }: { participants: 
         const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
         
         const headers = (json[0] as string[]) || [];
-        const body = json.slice(1);
         const dataAsObjects = XLSX.utils.sheet_to_json(worksheet);
 
         setImportState({ file, headers, data: dataAsObjects, mappings: {} });
