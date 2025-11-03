@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useContext } from "react";
@@ -44,10 +45,21 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { Category } from "@/lib/types";
-import { addCategory, updateCategory, deleteCategory, bulkAddCategories } from "@/lib/actions";
+import { addCategory, updateCategory, deleteCategory, bulkAddCategories, bulkDeleteCategories } from "@/lib/actions";
 import { useToast } from "@/hooks/use-toast";
 import { AppContext } from "@/context/app-context";
 import { Checkbox } from "./ui/checkbox";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 
 const categorySchema = z.object({
   id: z.string().optional(),
@@ -60,11 +72,24 @@ const categorySchema = z.object({
 
 const bulkCategorySchema = z.object({
   ageRanges: z.array(z.object({
-    min: z.coerce.number().int().min(0),
-    max: z.coerce.number().int().min(0),
-  })).min(1, "Debe definir al menos un rango de edad."),
+    min: z.coerce.number().int().min(0, "La edad mínima debe ser al menos 0."),
+    max: z.coerce.number().int().min(0, "La edad máxima debe ser al menos 0."),
+  })).min(1, "Debe definir al menos un rango de edad.").refine(
+    (ranges) => {
+      const sortedRanges = [...ranges].sort((a, b) => a.min - b.min);
+      for (let i = 0; i < sortedRanges.length - 1; i++) {
+        if (sortedRanges[i].max >= sortedRanges[i + 1].min) {
+          return false; // Overlap detected
+        }
+      }
+      return true;
+    },
+    {
+      message: "Los rangos de edad no deben solaparse.",
+    }
+  ),
   distances: z.array(z.string()).min(1, "Debe seleccionar al menos una distancia."),
-  genders: z.array(z.string()).min(1, "Debe seleccionar al menos un género."),
+  genders: z.array(z.string()),
 });
 
 
@@ -78,6 +103,8 @@ export function CategoryManager({ initialCategories }: { initialCategories: Cate
   const [open, setOpen] = useState(false);
   const [openBulk, setOpenBulk] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [isSelectAll, setIsSelectAll] = useState(false);
 
   const form = useForm<CategoryFormValues>({
     resolver: zodResolver(categorySchema),
@@ -176,6 +203,37 @@ export function CategoryManager({ initialCategories }: { initialCategories: Cate
     }
   };
 
+  const handleBulkDelete = async () => {
+    if (selectedCategories.length === 0) return;
+    try {
+        await bulkDeleteCategories(selectedCategories);
+        toast({ title: "Categorías Eliminadas", description: "Las categorías seleccionadas han sido eliminadas." });
+        setSelectedCategories([]);
+        setIsSelectAll(false);
+    } catch (error) {
+        toast({
+            variant: "destructive",
+            title: "Error",
+            description: "No se pudieron eliminar las categorías seleccionadas.",
+        });
+    }
+  };
+  
+  const handleSelectCategory = (id: string, checked: boolean) => {
+    setSelectedCategories(prev =>
+      checked ? [...prev, id] : prev.filter(catId => catId !== id)
+    );
+  };
+  
+  const handleSelectAll = (checked: boolean) => {
+    setIsSelectAll(checked);
+    if (checked) {
+      setSelectedCategories(initialCategories.map(c => c.id));
+    } else {
+      setSelectedCategories([]);
+    }
+  };
+
   const isAdmin = role === 'admin';
   const distancesOptions = ["5k", "10k", "21k", "42k"];
   const gendersOptions = [
@@ -185,7 +243,33 @@ export function CategoryManager({ initialCategories }: { initialCategories: Cate
 
   return (
     <>
-      <div className="flex justify-end mb-4">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
+        {isAdmin && selectedCategories.length > 0 ? (
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">{selectedCategories.length} seleccionada(s)</span>
+             <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive" size="sm">
+                  <Trash2 className="mr-2 h-4 w-4"/>
+                  Eliminar Seleccionadas
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Esta acción no se puede deshacer. Se eliminarán {selectedCategories.length} categoría(s) permanentemente.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleBulkDelete}>Eliminar</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+        ) : <div />}
+        
         {isAdmin && (
             <Button onClick={handleOpenBulkDialog}>
                 <Sparkles className="mr-2 h-4 w-4"/>
@@ -193,10 +277,25 @@ export function CategoryManager({ initialCategories }: { initialCategories: Cate
             </Button>
         )}
       </div>
+      
+      {isAdmin && (
+          <div className="flex items-center mb-4">
+            <Checkbox id="selectAll" checked={isSelectAll} onCheckedChange={handleSelectAll} />
+            <label htmlFor="selectAll" className="ml-2 text-sm font-medium">Seleccionar Todas</label>
+          </div>
+      )}
+
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {initialCategories.map((category) => (
-          <Card key={category.id}>
-            <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
+          <Card key={category.id} className="relative">
+            {isAdmin && (
+                <Checkbox
+                    checked={selectedCategories.includes(category.id)}
+                    onCheckedChange={(checked) => handleSelectCategory(category.id, !!checked)}
+                    className="absolute top-4 left-4 z-10"
+                />
+            )}
+            <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2 pl-12">
               <CardTitle className="text-lg font-medium">{category.name}</CardTitle>
               {isAdmin && (
                 <DropdownMenu>
@@ -218,7 +317,7 @@ export function CategoryManager({ initialCategories }: { initialCategories: Cate
                 </DropdownMenu>
               )}
             </CardHeader>
-            <CardContent>
+            <CardContent className="pl-12">
               <div className="text-sm text-muted-foreground">
                 <p>Edad: {category.minAge} - {category.maxAge}</p>
                 <p>Género: {category.gender === 'Any' ? 'Cualquiera' : category.gender === 'Male' ? 'Masculino' : category.gender === 'Female' ? 'Femenino' : 'Otro'}</p>
@@ -230,7 +329,7 @@ export function CategoryManager({ initialCategories }: { initialCategories: Cate
         {isAdmin && (
             <button
                 onClick={() => handleOpenDialog()}
-                className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground min-h-[150px]"
             >
                 <Plus className="h-10 w-10" />
                 <span className="mt-2 font-medium">Añadir Nueva Categoría</span>
@@ -358,6 +457,7 @@ export function CategoryManager({ initialCategories }: { initialCategories: Cate
             <form onSubmit={bulkForm.handleSubmit(onBulkSubmit)} className="space-y-6">
                 <div>
                     <FormLabel>Rangos de Edad</FormLabel>
+                     <FormMessage>{bulkForm.formState.errors.ageRanges?.root?.message}</FormMessage>
                     <div className="mt-2 space-y-2">
                         {fields.map((field, index) => (
                             <div key={field.id} className="flex items-center gap-2">
@@ -426,7 +526,7 @@ export function CategoryManager({ initialCategories }: { initialCategories: Cate
                     name="genders"
                     render={() => (
                         <FormItem>
-                            <FormLabel>Géneros</FormLabel>
+                            <FormLabel>Géneros (opcional)</FormLabel>
                             <div className="flex flex-wrap gap-4 mt-2">
                                 {gendersOptions.map(gender => (
                                     <FormField
@@ -467,3 +567,5 @@ export function CategoryManager({ initialCategories }: { initialCategories: Cate
     </>
   );
 }
+
+    

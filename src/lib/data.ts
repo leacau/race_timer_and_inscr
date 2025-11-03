@@ -1,3 +1,4 @@
+
 // This file simulates a database.
 import type { Participant, Category, ParticipantInput, CategoryInput } from "./types";
 
@@ -92,3 +93,10 @@ export async function deleteCategory(id: string): Promise<void> {
     await delay(100);
     db.categories = db.categories.filter(c => c.id !== id);
 }
+
+export async function bulkDeleteCategories(ids: string[]): Promise<void> {
+    await delay(100);
+    db.categories = db.categories.filter(c => !ids.includes(c.id));
+}
+
+    

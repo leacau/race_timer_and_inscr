@@ -1,3 +1,4 @@
+
 "use server";
 
 import { revalidatePath } from "next/cache";
@@ -13,7 +14,8 @@ import {
   addCategory as dbAddCategory,
   updateCategory as dbUpdateCategory,
   deleteCategory as dbDeleteCategory,
-  updateParticipantTime as dbUpdateParticipantTime
+  updateParticipantTime as dbUpdateParticipantTime,
+  bulkDeleteCategories as dbBulkDeleteCategories
 } from "./data";
 import type { Participant, Category, ParticipantInput, CategoryInput } from "./types";
 import { calculateAge } from "./utils";
@@ -88,28 +90,54 @@ export async function deleteCategory(id: string) {
     revalidatePath("/");
 }
 
+export async function bulkDeleteCategories(ids: string[]) {
+    await dbBulkDeleteCategories(ids);
+    revalidatePath("/categories");
+    revalidatePath("/");
+}
+
 const bulkCategorySchema = z.object({
   ageRanges: z.array(z.object({
     min: z.coerce.number().int().min(0),
     max: z.coerce.number().int().min(0),
-  })).min(1),
+  })).min(1).refine(
+    (ranges) => {
+      const sortedRanges = [...ranges].sort((a, b) => a.min - b.min);
+      for (let i = 0; i < sortedRanges.length - 1; i++) {
+        if (sortedRanges[i].max >= sortedRanges[i + 1].min) {
+          return false; // Overlap detected
+        }
+      }
+      return true;
+    },
+    {
+      message: "Los rangos de edad no deben solaparse.",
+    }
+  ),
   distances: z.array(z.string()).min(1),
-  genders: z.array(z.string()).min(1),
+  genders: z.array(z.string()),
 });
 
 export async function bulkAddCategories(data: z.infer<typeof bulkCategorySchema>) {
     const validatedData = bulkCategorySchema.parse(data);
-    const { ageRanges, distances, genders } = validatedData;
+    const { ageRanges, distances } = validatedData;
+    let { genders } = validatedData;
     
-    const genderMap = {
+    if (genders.length === 0) {
+        genders = ['Any'];
+    }
+
+    const genderMap: Record<string, string> = {
         'Male': 'Masculino',
         'Female': 'Femenino',
-    } as Record<string, string>;
+        'Any': 'General'
+    };
 
     for (const ageRange of ageRanges) {
         for (const distance of distances) {
             for (const gender of genders) {
-                const name = `${genderMap[gender]} ${ageRange.min}-${ageRange.max} ${distance}`;
+                const genderName = genderMap[gender] || 'General';
+                const name = `${genderName} ${ageRange.min}-${ageRange.max} ${distance}`;
                 const newCategory: CategoryInput = {
                     name,
                     minAge: ageRange.min,
@@ -186,3 +214,5 @@ export async function importFromExcel(formData: FormData) {
   revalidatePath("/");
   return { count };
 }
+
+    
