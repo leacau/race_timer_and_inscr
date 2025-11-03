@@ -4,7 +4,6 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import {
-  db,
   getParticipants as dbGetParticipants,
   getCategories as dbGetCategories,
   addParticipant as dbAddParticipant,
@@ -47,7 +46,7 @@ export async function addParticipant(participantData: ParticipantInput & { raceD
     revalidatePath("/");
 }
 
-export async function updateParticipant(participant: Omit<Participant, 'chipNumber'> & { raceDate: Date, ageCalculationMethod: AgeCalculationMethod }) {
+export async function updateParticipant(participant: Participant & { raceDate: Date, ageCalculationMethod: AgeCalculationMethod }) {
     const { raceDate, ageCalculationMethod, ...pData } = participant;
     const categories = await dbGetCategories();
     const categoryId = assignCategory(pData, categories, raceDate, ageCalculationMethod);

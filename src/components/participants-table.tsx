@@ -54,7 +54,7 @@ import type { Participant, Category } from "@/lib/types";
 import { cn, calculateAge, formatElapsedTime } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { AppContext } from "@/context/app-context";
-import { useForm, useFieldArray } from "react-hook-form";
+import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { addParticipant, updateParticipant, deleteParticipant, updateParticipantTime, importParticipants } from "@/lib/actions";
@@ -325,7 +325,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
         </TableCell>
         <TableCell>
           <div className={cn("font-mono text-lg", isRunning && "text-accent-foreground animate-pulse")}>
-            {formatElapsedTime(timer?.elapsed ?? 0)}
+            {formatElapsedTime(timer?.elapsed ?? p.finishTime ? p.finishTime - (p.startTime ?? 0) : 0)}
           </div>
         </TableCell>
         <TableCell className="text-right">
@@ -336,9 +336,9 @@ export function ParticipantsTable({ participants, categories }: { participants: 
                 size="sm"
                 onClick={() => toggleTimer(p)}
                 className="w-[80px]"
+                disabled={!!p.finishTime}
               >
-                {isRunning ? <Square className="mr-2 h-4 w-4" /> : <Play className="mr-2 h-4 w-4" />}
-                {isRunning ? "Parar" : "Iniciar"}
+                {p.finishTime ? 'Finalizado' : (isRunning ? <><Square className="mr-2 h-4 w-4" />Parar</> : <><Play className="mr-2 h-4 w-4" />Iniciar</>)}
               </Button>
             )}
             {isAdmin && (
@@ -396,12 +396,17 @@ export function ParticipantsTable({ participants, categories }: { participants: 
           </div>
           <div className="flex items-center justify-between mt-4">
              <div className={cn("font-mono text-2xl", isRunning && "text-accent-foreground animate-pulse")}>
-              {formatElapsedTime(timer?.elapsed ?? 0)}
+              {formatElapsedTime(timer?.elapsed ?? p.finishTime ? p.finishTime - (p.startTime ?? 0) : 0)}
             </div>
             {isAdmin && (
-              <Button variant={isRunning ? "destructive" : "default"} size="sm" onClick={() => toggleTimer(p)} className="w-24">
-                {isRunning ? <Square className="mr-2 h-4 w-4" /> : <Play className="mr-2 h-4 w-4" />}
-                {isRunning ? "Parar" : "Iniciar"}
+              <Button 
+                variant={isRunning ? "destructive" : "default"} 
+                size="sm" 
+                onClick={() => toggleTimer(p)} 
+                className="w-24"
+                disabled={!!p.finishTime}
+              >
+                {p.finishTime ? 'Finalizado' : (isRunning ? <><Square className="mr-2 h-4 w-4" />Parar</> : <><Play className="mr-2 h-4 w-4" />Iniciar</>)}
               </Button>
             )}
           </div>

@@ -1,96 +1,90 @@
 
-// This file simulates a database.
+"use server";
+
+import { db } from "./firebase";
+import { 
+    collection, 
+    getDocs, 
+    addDoc, 
+    updateDoc, 
+    deleteDoc, 
+    doc,
+    query,
+    orderBy,
+    writeBatch,
+    where,
+    getDoc
+} from "firebase/firestore";
 import type { Participant, Category, ParticipantInput, CategoryInput } from "./types";
 
-let participants: Participant[] = [
-  { id: '1', name: 'John', surname: 'Doe', dni: '12345678', gender: 'Male', birthDate: '1990-05-15', distance: '10k', categoryId: 'cat1', bibNumber: '101', chipNumber: 'LT00101', age: 34 },
-  { id: '2', name: 'Jane', surname: 'Smith', dni: '87654321', gender: 'Female', birthDate: '1985-11-20', distance: '10k', categoryId: 'cat2', bibNumber: '102', chipNumber: 'LT00102', age: 38 },
-  { id: '3', name: 'Peter', surname: 'Jones', dni: '11223344', gender: 'Male', birthDate: '2000-01-10', distance: '5k', categoryId: 'cat3', bibNumber: '103', chipNumber: 'LT00103', age: 24 },
-];
-
-let categories: Category[] = [
-  { id: 'cat1', name: 'Masculino 30-39 10k', minAge: 30, maxAge: 39, gender: 'Male', distance: '10k' },
-  { id: 'cat2', name: 'Femenino 30-39 10k', minAge: 30, maxAge: 39, gender: 'Female', distance: '10k' },
-  { id: 'cat3', name: 'Masculino 18-29 5k', minAge: 18, maxAge: 29, gender: 'Male', distance: '5k' },
-];
-
-// In a real app, you would use a persistent database.
-// The "db" object simulates asynchronous database calls.
-export const db = {
-  participants,
-  categories,
-};
-
-// Simulate API latency
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
 export async function getParticipants(): Promise<Participant[]> {
-  await delay(100);
-  // Sort participants by surname, then name
-  return [...db.participants].sort((a, b) => {
-    return parseInt(a.bibNumber) - parseInt(b.bibNumber);
-  });
+    const participantsCol = collection(db, "participants");
+    const q = query(participantsCol, orderBy("bibNumber"));
+    const participantSnapshot = await getDocs(q);
+    const participantList = participantSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Participant));
+    return participantList;
 }
 
 export async function getCategories(): Promise<Category[]> {
-  await delay(100);
-  return [...db.categories].sort((a, b) => a.name.localeCompare(b.name));
+    const categoriesCol = collection(db, "categories");
+    const q = query(categoriesCol, orderBy("name"));
+    const categorySnapshot = await getDocs(q);
+    const categoryList = categorySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Category));
+    return categoryList;
 }
 
 export async function addParticipant(participant: ParticipantInput & { categoryId?: string, chipNumber: string }): Promise<Participant> {
-  await delay(100);
-  const newParticipant: Participant = { ...participant, id: String(Date.now()) };
-  db.participants.push(newParticipant);
-  return newParticipant;
+    const docRef = await addDoc(collection(db, "participants"), participant);
+    return { ...participant, id: docRef.id };
 }
 
 export async function updateParticipant(updatedParticipant: Participant): Promise<Participant | null> {
-    await delay(100);
-    const index = db.participants.findIndex(p => p.id === updatedParticipant.id);
-    if (index !== -1) {
-        db.participants[index] = { ...db.participants[index], ...updatedParticipant };
-        return db.participants[index];
+    const participantRef = doc(db, "participants", updatedParticipant.id);
+    await updateDoc(participantRef, updatedParticipant);
+    const updatedDoc = await getDoc(participantRef);
+    if(updatedDoc.exists()) {
+        return { id: updatedDoc.id, ...updatedDoc.data() } as Participant;
     }
     return null;
 }
 
+
 export async function deleteParticipant(id: string): Promise<void> {
-    await delay(100);
-    db.participants = db.participants.filter(p => p.id !== id);
+    await deleteDoc(doc(db, "participants", id));
 }
 
 export async function updateParticipantTime(id: string, startTime: number, finishTime: number): Promise<void> {
-    await delay(100);
-    const index = db.participants.findIndex(p => p.id === id);
-    if (index !== -1) {
-        db.participants[index].startTime = startTime;
-        db.participants[index].finishTime = finishTime;
-    }
+    const participantRef = doc(db, "participants", id);
+    await updateDoc(participantRef, { startTime, finishTime });
 }
 
 export async function addCategory(category: CategoryInput): Promise<Category> {
-  await delay(100);
-  const newCategory: Category = { ...category, id: String(Date.now()) };
-  db.categories.push(newCategory);
-  return newCategory;
+    const docRef = await addDoc(collection(db, "categories"), category);
+    return { ...category, id: docRef.id };
 }
 
 export async function updateCategory(updatedCategory: Category): Promise<Category | null> {
-    await delay(100);
-    const index = db.categories.findIndex(c => c.id === updatedCategory.id);
-    if (index !== -1) {
-        db.categories[index] = updatedCategory;
-        return db.categories[index];
+    const categoryRef = doc(db, "categories", updatedCategory.id);
+    // Firestore updateDoc doesn't like the id field in the data object
+    const { id, ...dataToUpdate } = updatedCategory;
+    await updateDoc(categoryRef, dataToUpdate);
+    const updatedDoc = await getDoc(categoryRef);
+    if(updatedDoc.exists()) {
+        return { id: updatedDoc.id, ...updatedDoc.data() } as Category;
     }
     return null;
 }
 
 export async function deleteCategory(id: string): Promise<void> {
-    await delay(100);
-    db.categories = db.categories.filter(c => c.id !== id);
+    await deleteDoc(doc(db, "categories", id));
 }
 
 export async function bulkDeleteCategories(ids: string[]): Promise<void> {
-    await delay(100);
-    db.categories = db.categories.filter(c => !ids.includes(c.id));
+    if (ids.length === 0) return;
+    const batch = writeBatch(db);
+    ids.forEach(id => {
+        const docRef = doc(db, "categories", id);
+        batch.delete(docRef);
+    });
+    await batch.commit();
 }
