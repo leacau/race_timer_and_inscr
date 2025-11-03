@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useContext, useMemo, useRef } from "react";
+import * as XLSX from "xlsx";
 import {
   Table,
   TableBody,
@@ -51,10 +52,10 @@ import type { Participant, Category } from "@/lib/types";
 import { cn, calculateAge, formatElapsedTime } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { AppContext } from "@/context/app-context";
-import { useForm } from "react-hook-form";
+import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { addParticipant, updateParticipant, deleteParticipant, updateParticipantTime, importFromExcel } from "@/lib/actions";
+import { addParticipant, updateParticipant, deleteParticipant, updateParticipantTime, importParticipants } from "@/lib/actions";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 type TimerState = {
@@ -68,14 +69,38 @@ type TimerState = {
 
 const participantSchema = z.object({
   id: z.string().optional(),
+  bibNumber: z.string().min(1, "El dorsal es requerido"),
   name: z.string().min(1, "El nombre es requerido"),
   surname: z.string().min(1, "El apellido es requerido"),
   dni: z.string().min(1, "El DNI/ID es requerido"),
   birthDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Introduce la fecha en formato AAAA-MM-DD"),
   gender: z.enum(["Male", "Female", "Other"]),
   distance: z.enum(["5k", "10k", "21k", "42k"]),
+  city: z.string().optional(),
+  province: z.string().optional(),
+  country: z.string().optional(),
 });
 type ParticipantFormValues = z.infer<typeof participantSchema>;
+
+type ImportState = {
+  file: File | null;
+  headers: string[];
+  data: any[];
+  mappings: Record<string, string>;
+}
+
+const systemFields = [
+    { key: "bibNumber", label: "Dorsal", required: true },
+    { key: "name", label: "Nombre", required: true },
+    { key: "surname", label: "Apellido", required: true },
+    { key: "dni", label: "DNI/ID", required: true },
+    { key: "birthDate", label: "Fecha de Nacimiento", required: true },
+    { key: "gender", label: "Género", required: true },
+    { key_key: "distance", label: "Distancia", required: true },
+    { key: "city", label: "Ciudad", required: false },
+    { key: "province", label: "Provincia", required: false },
+    { key: "country", label: "País", required: false },
+];
 
 export function ParticipantsTable({ participants, categories }: { participants: Participant[]; categories: Category[] }) {
   const { toast } = useToast();
@@ -86,6 +111,9 @@ export function ParticipantsTable({ participants, categories }: { participants: 
   const [editingParticipant, setEditingParticipant] = useState<Participant | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [importState, setImportState] = useState<ImportState>({ file: null, headers: [], data: [], mappings: {} });
+  const [isImportMappingOpen, setIsImportMappingOpen] = useState(false);
+
   const categoryMap = useMemo(() => {
     return categories.reduce((acc, category) => {
       acc[category.id] = category.name;
@@ -95,7 +123,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
 
   const form = useForm<ParticipantFormValues>({
     resolver: zodResolver(participantSchema),
-    defaultValues: { name: "", surname: "", dni: "", birthDate: "", gender: "Male", distance: "5k" },
+    defaultValues: { name: "", surname: "", dni: "", birthDate: "", gender: "Male", distance: "5k", bibNumber: "" },
   });
 
   const handleOpenDialog = (participant?: Participant) => {
@@ -104,7 +132,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
       form.reset(participant);
     } else {
       setEditingParticipant(null);
-      form.reset({ name: "", surname: "", dni: "", birthDate: "", gender: "Male", distance: "5k" });
+      form.reset({ name: "", surname: "", dni: "", birthDate: "", gender: "Male", distance: "5k", bibNumber: "" });
     }
     setOpen(true);
   };
@@ -133,27 +161,83 @@ export function ParticipantsTable({ participants, categories }: { participants: 
     }
   };
 
-  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const formData = new FormData();
-    formData.append("file", file);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const data = e.target?.result;
+        const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        
+        const headers = (json[0] as string[]) || [];
+        const body = json.slice(1);
+        const dataAsObjects = XLSX.utils.sheet_to_json(worksheet);
 
-    try {
-      const result = await importFromExcel(formData);
-      toast({
-        title: "Importación Exitosa",
-        description: `${result.count} participantes importados.`,
-      });
-    } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Importación Fallida",
-        description: "No se pudieron importar los participantes del archivo.",
-      });
-    }
+        setImportState({ file, headers, data: dataAsObjects, mappings: {} });
+        setIsImportMappingOpen(true);
+    };
+    reader.readAsArrayBuffer(file);
+    event.target.value = ''; // Reset file input
   };
+  
+  const handleMappingChange = (systemField: string, fileHeader: string) => {
+    setImportState(prev => ({
+        ...prev,
+        mappings: { ...prev.mappings, [systemField]: fileHeader }
+    }));
+  }
+  
+  const handleProcessImport = async () => {
+    const { data, mappings } = importState;
+    
+    const participantsToImport = data.map(row => {
+        const participant: any = {};
+        for(const field of systemFields) {
+            const fileHeader = mappings[field.key];
+            if (fileHeader && row[fileHeader] !== undefined) {
+                let value = row[fileHeader];
+                if (field.key === 'gender') {
+                    const genderRaw = String(value).toLowerCase();
+                    if (genderRaw.startsWith('m') || genderRaw === 'male' || genderRaw === 'masculino') value = 'Male';
+                    else if (genderRaw.startsWith('f') || genderRaw === 'female' || genderRaw === 'femenino') value = 'Female';
+                    else value = 'Other';
+                }
+                if (field.key === 'distance') {
+                    const distanceRaw = String(value).toLowerCase();
+                    if (distanceRaw.includes('10')) value = '10k';
+                    else if (distanceRaw.includes('21')) value = '21k';
+                    else if (distanceRaw.includes('42')) value = '42k';
+                    else value = '5k';
+                }
+                if (field.key === 'birthDate' && value instanceof Date) {
+                   value = value.toISOString().split('T')[0];
+                }
+                participant[field.key] = String(value);
+            }
+        }
+        return participant;
+    });
+    
+    try {
+        const result = await importParticipants(participantsToImport);
+        toast({
+            title: "Importación Exitosa",
+            description: `${result.count} participantes importados.`
+        });
+        setIsImportMappingOpen(false);
+    } catch (error) {
+        toast({
+            variant: "destructive",
+            title: "Error de Importación",
+            description: "No se pudieron importar los participantes.",
+        });
+    }
+  }
+
 
   const toggleTimer = (participant: Participant) => {
     if (timers[participant.id]?.isRunning) {
@@ -217,8 +301,8 @@ export function ParticipantsTable({ participants, categories }: { participants: 
     
     return (
       <TableRow key={p.id}>
+        <TableCell className="font-medium">{p.bibNumber}</TableCell>
         <TableCell className="font-medium">{`${p.name} ${p.surname}`}</TableCell>
-        <TableCell className="hidden md:table-cell">{p.dni}</TableCell>
         <TableCell className="hidden lg:table-cell">{age}</TableCell>
         <TableCell className="hidden md:table-cell">
           {p.categoryId ? (
@@ -277,6 +361,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
         <CardContent className="p-4">
           <div className="flex justify-between items-start">
             <div>
+              <p className="text-sm font-semibold text-primary">#{p.bibNumber}</p>
               <h3 className="font-semibold">{`${p.name} ${p.surname}`}</h3>
               <p className="text-sm text-muted-foreground">
                 {age} años | {p.distance} | {p.gender === 'Male' ? 'Masculino' : p.gender === 'Female' ? 'Femenino' : 'Otro'}
@@ -322,14 +407,14 @@ export function ParticipantsTable({ participants, categories }: { participants: 
               <Plus className="mr-2 h-4 w-4" /> Añadir Participante
             </Button>
             <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
-              <Upload className="mr-2 h-4 w-4" /> Importar Excel
+              <Upload className="mr-2 h-4 w-4" /> Importar
             </Button>
             <input
               type="file"
               ref={fileInputRef}
               onChange={handleFileChange}
               className="hidden"
-              accept=".xlsx, .csv"
+              accept=".xlsx, .xls, .csv"
             />
           </>
         )}
@@ -345,8 +430,8 @@ export function ParticipantsTable({ participants, categories }: { participants: 
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead>Dorsal</TableHead>
                 <TableHead>Nombre</TableHead>
-                <TableHead className="hidden md:table-cell">DNI</TableHead>
                 <TableHead className="hidden lg:table-cell">Edad</TableHead>
                 <TableHead className="hidden md:table-cell">Categoría</TableHead>
                 <TableHead>Tiempo</TableHead>
@@ -369,14 +454,18 @@ export function ParticipantsTable({ participants, categories }: { participants: 
       </Card>
       )}
 
+      {/* Add/Edit Participant Dialog */}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-[425px]">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{editingParticipant ? "Editar Participante" : "Añadir Nuevo Participante"}</DialogTitle>
             <DialogDescription>{editingParticipant ? "Actualizar detalles del participante." : "Añadir un nuevo participante a la carrera."}</DialogDescription>
           </DialogHeader>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+              <FormField control={form.control} name="bibNumber" render={({ field }) => (
+                <FormItem><FormLabel>Dorsal</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+              )} />
               <div className="grid grid-cols-2 gap-4">
                 <FormField control={form.control} name="name" render={({ field }) => (
                   <FormItem><FormLabel>Nombre</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
@@ -421,10 +510,49 @@ export function ParticipantsTable({ participants, categories }: { participants: 
               </div>
               <DialogFooter>
                 <DialogClose asChild><Button type="button" variant="secondary">Cancelar</Button></DialogClose>
-                <Button type="submit">Guardar Participante</Button>
+                <Button type="submit">Guardar</Button>
               </DialogFooter>
             </form>
           </Form>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Import Mapping Dialog */}
+      <Dialog open={isImportMappingOpen} onOpenChange={setIsImportMappingOpen}>
+        <DialogContent className="sm:max-w-xl max-h-[90vh] flex flex-col">
+            <DialogHeader>
+                <DialogTitle>Mapear Columnas para Importar</DialogTitle>
+                <DialogDescription>
+                    Asigna las columnas de tu archivo a los campos de datos del sistema. Los campos requeridos están marcados con un *.
+                </DialogDescription>
+            </DialogHeader>
+            <div className="flex-1 overflow-y-auto pr-4 -mr-4">
+                <div className="grid grid-cols-2 gap-x-6 gap-y-4">
+                    {systemFields.map(field => (
+                        <div key={field.key} className="space-y-2">
+                           <Label>
+                                {field.label}
+                                {field.required && <span className="text-destructive"> *</span>}
+                            </Label>
+                            <Select onValueChange={(value) => handleMappingChange(field.key, value)}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Seleccionar columna..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="--ignore--">No importar</SelectItem>
+                                    {importState.headers.map(header => (
+                                        <SelectItem key={header} value={header}>{header}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    ))}
+                </div>
+            </div>
+            <DialogFooter>
+                <DialogClose asChild><Button type="button" variant="secondary">Cancelar</Button></DialogClose>
+                <Button onClick={handleProcessImport}>Importar Participantes</Button>
+            </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

@@ -3,9 +3,9 @@
 import type { Participant, Category, ParticipantInput, CategoryInput } from "./types";
 
 let participants: Participant[] = [
-  { id: '1', name: 'John', surname: 'Doe', dni: '12345678', gender: 'Male', birthDate: '1990-05-15', distance: '10k', categoryId: 'cat1' },
-  { id: '2', name: 'Jane', surname: 'Smith', dni: '87654321', gender: 'Female', birthDate: '1985-11-20', distance: '10k', categoryId: 'cat2' },
-  { id: '3', name: 'Peter', surname: 'Jones', dni: '11223344', gender: 'Male', birthDate: '2000-01-10', distance: '5k', categoryId: 'cat3' },
+  { id: '1', name: 'John', surname: 'Doe', dni: '12345678', gender: 'Male', birthDate: '1990-05-15', distance: '10k', categoryId: 'cat1', bibNumber: '101', chipNumber: 'LT00101' },
+  { id: '2', name: 'Jane', surname: 'Smith', dni: '87654321', gender: 'Female', birthDate: '1985-11-20', distance: '10k', categoryId: 'cat2', bibNumber: '102', chipNumber: 'LT00102' },
+  { id: '3', name: 'Peter', surname: 'Jones', dni: '11223344', gender: 'Male', birthDate: '2000-01-10', distance: '5k', categoryId: 'cat3', bibNumber: '103', chipNumber: 'LT00103' },
 ];
 
 let categories: Category[] = [
@@ -28,11 +28,7 @@ export async function getParticipants(): Promise<Participant[]> {
   await delay(100);
   // Sort participants by surname, then name
   return [...db.participants].sort((a, b) => {
-    if (a.surname < b.surname) return -1;
-    if (a.surname > b.surname) return 1;
-    if (a.name < b.name) return -1;
-    if (a.name > b.name) return 1;
-    return 0;
+    return parseInt(a.bibNumber) - parseInt(b.bibNumber);
   });
 }
 
@@ -41,7 +37,7 @@ export async function getCategories(): Promise<Category[]> {
   return [...db.categories].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export async function addParticipant(participant: ParticipantInput & { categoryId?: string }): Promise<Participant> {
+export async function addParticipant(participant: ParticipantInput & { categoryId?: string, chipNumber: string }): Promise<Participant> {
   await delay(100);
   const newParticipant: Participant = { ...participant, id: String(Date.now()) };
   db.participants.push(newParticipant);
@@ -98,5 +94,3 @@ export async function bulkDeleteCategories(ids: string[]): Promise<void> {
     await delay(100);
     db.categories = db.categories.filter(c => !ids.includes(c.id));
 }
-
-    

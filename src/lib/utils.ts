@@ -9,6 +9,10 @@ export function cn(...inputs: ClassValue[]) {
 export function calculateAge(birthDate: string): number {
   if (!birthDate) return 0;
   try {
+    // Handle Excel date serial numbers
+    if (typeof birthDate === 'number') {
+      return differenceInYears(new Date(), new Date(Date.UTC(1900, 0, birthDate - 1)));
+    }
     return differenceInYears(new Date(), new Date(birthDate));
   } catch (error) {
     return 0;
@@ -24,4 +28,10 @@ export function formatElapsedTime(ms: number): string {
   const milliseconds = Math.floor((ms % 1000) / 10);
 
   return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(2, '0')}`;
+}
+
+export function generateChipNumber(bibNumber: string): string {
+  if (!bibNumber) return "";
+  const paddedBib = String(bibNumber).padStart(5, '0');
+  return `LT${paddedBib}`;
 }

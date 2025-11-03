@@ -9,9 +9,14 @@ export type Participant = {
   categoryId?: string;
   startTime?: number; // timestamp
   finishTime?: number; // timestamp
+  bibNumber: string;
+  chipNumber: string;
+  city?: string;
+  province?: string;
+  country?: string;
 };
 
-export type ParticipantInput = Omit<Participant, 'id' | 'categoryId' | 'startTime' | 'finishTime'>;
+export type ParticipantInput = Omit<Participant, 'id' | 'categoryId' | 'startTime' | 'finishTime' | 'chipNumber'>;
 
 export type Category = {
   id: string;

@@ -3,7 +3,6 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import * as XLSX from "xlsx";
 import {
   db,
   getParticipants as dbGetParticipants,
@@ -18,9 +17,9 @@ import {
   bulkDeleteCategories as dbBulkDeleteCategories
 } from "./data";
 import type { Participant, Category, ParticipantInput, CategoryInput } from "./types";
-import { calculateAge } from "./utils";
+import { calculateAge, generateChipNumber } from "./utils";
 
-const assignCategory = (participant: Omit<Participant, "id">, categories: Category[]): string | undefined => {
+const assignCategory = (participant: Omit<Participant, "id" | "chipNumber">, categories: Category[]): string | undefined => {
     const age = calculateAge(participant.birthDate);
     for (const category of categories) {
         if (
@@ -40,14 +39,16 @@ const assignCategory = (participant: Omit<Participant, "id">, categories: Catego
 export async function addParticipant(participantData: ParticipantInput) {
     const categories = await dbGetCategories();
     const categoryId = assignCategory(participantData, categories);
-    await dbAddParticipant({ ...participantData, categoryId });
+    const chipNumber = generateChipNumber(participantData.bibNumber);
+    await dbAddParticipant({ ...participantData, categoryId, chipNumber });
     revalidatePath("/");
 }
 
-export async function updateParticipant(participant: Participant) {
+export async function updateParticipant(participant: Omit<Participant, 'chipNumber'>) {
     const categories = await dbGetCategories();
     const categoryId = assignCategory(participant, categories);
-    await dbUpdateParticipant({ ...participant, categoryId });
+    const chipNumber = generateChipNumber(participant.bibNumber);
+    await dbUpdateParticipant({ ...participant, categoryId, chipNumber });
     revalidatePath("/");
 }
 
@@ -154,65 +155,43 @@ export async function bulkAddCategories(data: z.infer<typeof bulkCategorySchema>
     revalidatePath("/");
 }
 
-
 // Excel Import Action
-export async function importFromExcel(formData: FormData) {
-  const file = formData.get("file") as File;
-  if (!file) {
-    throw new Error("No file uploaded");
-  }
+const importParticipantSchema = z.object({
+  name: z.string().min(1),
+  surname: z.string().min(1),
+  dni: z.string().min(1),
+  birthDate: z.string(), // We'll handle date conversion/validation separately
+  gender: z.enum(['Male', 'Female', 'Other']),
+  distance: z.enum(['5k', '10k', '21k', '42k']),
+  bibNumber: z.string().min(1),
+  city: z.string().optional(),
+  province: z.string().optional(),
+  country: z.string().optional(),
+});
 
-  const buffer = await file.arrayBuffer();
-  const workbook = XLSX.read(buffer, { type: "buffer" });
-  const sheetName = workbook.SheetNames[0];
-  const sheet = workbook.Sheets[sheetName];
-  const data = XLSX.utils.sheet_to_json(sheet) as any[];
 
+export async function importParticipants(participants: z.infer<typeof importParticipantSchema>[]) {
   const categories = await dbGetCategories();
   let count = 0;
+  
+  for (const p of participants) {
+    try {
+      const validatedParticipant = importParticipantSchema.parse(p);
+      const categoryId = assignCategory(validatedParticipant, categories);
+      const chipNumber = generateChipNumber(validatedParticipant.bibNumber);
 
-  for (const row of data) {
-    // Handle different column name variations
-    const name = String(row.name || row.Name || row.Nombre || '');
-    const surname = String(row.surname || row.Surname || row.Apellido || '');
-    const dni = String(row.dni || row.DNI || '');
-    const birthDate = String(row.birthDate || row['Birth Date'] || row['Fecha de Nacimiento'] || '');
-    const genderRaw = String(row.gender || row.Gender || row.Género || '').toLowerCase();
-    const distanceRaw = String(row.distance || row.Distance || row.Distancia || '').toLowerCase();
-
-    // Normalize gender
-    let gender: Participant['gender'] = 'Other';
-    if (genderRaw.startsWith('m') || genderRaw === 'male' || genderRaw === 'masculino') {
-        gender = 'Male';
-    } else if (genderRaw.startsWith('f') || genderRaw === 'female' || genderRaw === 'femenino') {
-        gender = 'Female';
-    }
-
-    // Normalize distance
-    let distance: Participant['distance'] = '5k';
-    if (distanceRaw.includes('10')) distance = '10k';
-    else if (distanceRaw.includes('21')) distance = '21k';
-    else if (distanceRaw.includes('42')) distance = '42k';
-
-    const participantData = {
-        name,
-        surname,
-        dni,
-        birthDate, // Should be YYYY-MM-DD or a format Date can parse
-        gender,
-        distance,
-    };
-
-    // Basic validation
-    if (participantData.name && participantData.surname && participantData.dni && participantData.birthDate) {
-        const categoryId = assignCategory(participantData, categories);
-        await dbAddParticipant({ ...participantData, categoryId });
-        count++;
+      await dbAddParticipant({
+        ...validatedParticipant,
+        categoryId,
+        chipNumber,
+      });
+      count++;
+    } catch (error) {
+      console.error("Failed to import participant:", p, error);
+      // Optionally, you could collect and return errors
     }
   }
-  
+
   revalidatePath("/");
   return { count };
 }
-
-    
