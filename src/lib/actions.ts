@@ -159,7 +159,8 @@ export async function bulkAddCategories(data: z.infer<typeof bulkCategorySchema>
 }
 
 // Excel Import Action
-const importParticipantSchema = z.object({
+const serverImportParticipantSchema = z.object({
+  bibNumber: z.string().min(1),
   name: z.string().min(1),
   surname: z.string().min(1),
   dni: z.string().min(1),
@@ -167,22 +168,20 @@ const importParticipantSchema = z.object({
   age: z.coerce.number().int().min(0).optional(),
   gender: z.enum(['Male', 'Female', 'Other']),
   distance: z.enum(['5k', '10k', '21k', '42k']),
-  bibNumber: z.string().min(1),
   city: z.string().optional(),
   province: z.string().optional(),
   country: z.string().optional(),
-}).refine(data => !!data.birthDate || (data.age !== undefined && data.age >= 0), {
-  message: "Debe proporcionar la fecha de nacimiento o la edad para cada participante importado.",
 });
 
 
-export async function importParticipants(participants: z.infer<typeof importParticipantSchema>[], raceDate: Date, ageCalculationMethod: AgeCalculationMethod) {
+export async function importParticipants(participants: z.infer<typeof serverImportParticipantSchema>[], raceDate: Date, ageCalculationMethod: AgeCalculationMethod) {
   const categories = await dbGetCategories();
   let count = 0;
   
   for (const p of participants) {
     try {
-      const validatedParticipant = importParticipantSchema.parse(p);
+      // Data is pre-validated on client, here we just ensure type safety for the action's scope
+      const validatedParticipant = serverImportParticipantSchema.parse(p);
       const categoryId = assignCategory(validatedParticipant, categories, raceDate, ageCalculationMethod);
       const chipNumber = generateChipNumber(validatedParticipant.bibNumber);
 

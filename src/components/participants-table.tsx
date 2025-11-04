@@ -110,6 +110,22 @@ const systemFields = [
     { key: "country", label: "País", required: false },
 ];
 
+const importParticipantSchema = z.object({
+  bibNumber: z.string().min(1),
+  name: z.string().min(1),
+  surname: z.string().min(1),
+  dni: z.string().min(1),
+  birthDate: z.string().optional(),
+  age: z.coerce.number().int().min(0).optional(),
+  gender: z.enum(['Male', 'Female', 'Other']),
+  distance: z.enum(['5k', '10k', '21k', '42k']),
+  city: z.string().optional(),
+  province: z.string().optional(),
+  country: z.string().optional(),
+}).refine(data => !!data.birthDate || (data.age !== undefined && data.age >= 0), {
+  message: "Debe proporcionar la fecha de nacimiento o la edad para cada participante importado.",
+});
+
 export function ParticipantsTable({ participants, categories }: { participants: Participant[]; categories: Category[] }) {
   const { toast } = useToast();
   const { role, raceDate, ageCalculationMethod } = useContext(AppContext);
@@ -207,7 +223,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
     const { data, mappings } = importState;
     
     const participantsToImport = data.map(row => {
-        const participant: any = {};
+        const participant: { [key: string]: any } = {};
         for(const field of systemFields) {
             const fileHeader = mappings[field.key];
             if (fileHeader && row[fileHeader] !== undefined) {
@@ -228,14 +244,37 @@ export function ParticipantsTable({ participants, categories }: { participants: 
                 if (field.key === 'birthDate' && value instanceof Date) {
                    value = value.toISOString().split('T')[0];
                 }
-                participant[field.key] = String(value);
+                 if (field.key === 'age' && value) {
+                    value = parseInt(String(value), 10);
+                } else if (field.key !== 'age') {
+                    value = String(value);
+                }
+                participant[field.key] = value;
             }
         }
         return participant;
     });
+
+    const validatedParticipants = participantsToImport.map(p => {
+        try {
+            return importParticipantSchema.parse(p);
+        } catch (e) {
+            console.error("Validation failed for participant:", p, e);
+            return null;
+        }
+    }).filter(Boolean);
+
+    if (validatedParticipants.length !== participantsToImport.length) {
+        toast({
+            variant: "destructive",
+            title: "Error de Validación",
+            description: "Algunos participantes no pudieron ser validados. Revisa la consola para más detalles.",
+        });
+        if(validatedParticipants.length === 0) return;
+    }
     
     try {
-        const result = await importParticipants(participantsToImport, raceDate, ageCalculationMethod);
+        const result = await importParticipants(validatedParticipants as z.infer<typeof importParticipantSchema>[], raceDate, ageCalculationMethod);
         toast({
             title: "Importación Exitosa",
             description: `${result.count} participantes importados.`
