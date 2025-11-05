@@ -4,63 +4,80 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import {
-  getCategories as dbGetCategories,
-  addParticipant as dbAddParticipant,
-  updateParticipant as dbUpdateParticipant,
-  deleteParticipant as dbDeleteParticipant,
   addCategory as dbAddCategory,
-  updateCategory as dbUpdateCategory,
-  deleteCategory as dbDeleteCategory,
-  updateParticipantTime as dbUpdateParticipantTime,
+  addParticipant as dbAddParticipant,
   bulkDeleteCategories as dbBulkDeleteCategories,
+  deleteCategory as dbDeleteCategory,
+  deleteParticipant as dbDeleteParticipant,
+  getCategories as dbGetCategories,
   importParticipants as dbImportParticipants,
+  updateCategory as dbUpdateCategory,
+  updateParticipant as dbUpdateParticipant,
+  updateParticipantTime as dbUpdateParticipantTime,
 } from "./data";
-import type { Participant, Category, ParticipantInput, AgeCalculationMethod } from "./types";
+import type { AgeCalculationMethod, Category, CategoryInput, Participant, ParticipantInput } from "./types";
 import { calculateAge, generateChipNumber } from "./utils";
 
-const assignCategory = (participant: Omit<Participant, "id" | "chipNumber">, categories: Category[], raceDate: Date, ageCalculationMethod: AgeCalculationMethod): string | undefined => {
-    const age = participant.age ?? calculateAge(participant.birthDate, raceDate, ageCalculationMethod);
-    if (age === null) return undefined;
+const assignCategory = (
+  participant: Omit<Participant, "id" | "chipNumber">,
+  categories: Category[],
+  raceDate: Date,
+  ageCalculationMethod: AgeCalculationMethod
+): string | undefined => {
+  const age =
+    participant.age ??
+    calculateAge(participant.birthDate, raceDate, ageCalculationMethod);
+  if (age === null) return undefined;
 
-    for (const category of categories) {
-        if (
-            participant.distance === category.distance &&
-            (category.gender === 'Any' || category.gender === participant.gender) &&
-            age >= category.minAge &&
-            age <= category.maxAge
-        ) {
-            return category.id;
-        }
+  for (const category of categories) {
+    if (
+      participant.distance === category.distance &&
+      (category.gender === "Any" || category.gender === participant.gender) &&
+      age >= category.minAge &&
+      age <= category.maxAge
+    ) {
+      return category.id;
     }
-    return undefined;
+  }
+  return undefined;
 };
 
-
 // Participant Actions
-export async function addParticipant(participantData: ParticipantInput & { raceDate: Date, ageCalculationMethod: AgeCalculationMethod }) {
-    const categories = await dbGetCategories();
-    const categoryId = assignCategory(participantData, categories, participantData.raceDate, participantData.ageCalculationMethod);
-    const chipNumber = generateChipNumber(participantData.bibNumber);
-    await dbAddParticipant({ ...participantData, categoryId, chipNumber });
-    revalidatePath("/");
+export async function addParticipant(participantData: ParticipantInput) {
+  await dbAddParticipant(participantData);
+  revalidatePath("/");
 }
 
-export async function updateParticipant(participant: Participant & { raceDate: Date, ageCalculationMethod: AgeCalculationMethod }) {
-    const { raceDate, ageCalculationMethod, ...pData } = participant;
-    const categories = await dbGetCategories();
-    const categoryId = assignCategory(pData, categories, raceDate, ageCalculationMethod);
-    await dbUpdateParticipant({ ...pData, categoryId });
-    revalidatePath("/");
+export async function updateParticipant(
+  participant: Participant & {
+    raceDate: Date;
+    ageCalculationMethod: AgeCalculationMethod;
+  }
+) {
+  const { raceDate, ageCalculationMethod, ...pData } = participant;
+  const categories = await dbGetCategories();
+  const categoryId = assignCategory(
+    pData,
+    categories,
+    raceDate,
+    ageCalculationMethod
+  );
+  await dbUpdateParticipant({ ...pData, categoryId });
+  revalidatePath("/");
 }
 
 export async function deleteParticipant(id: string) {
-    await dbDeleteParticipant(id);
-    revalidatePath("/");
+  await dbDeleteParticipant(id);
+  revalidatePath("/");
 }
 
-export async function updateParticipantTime(id: string, startTime: number, finishTime: number) {
-    await dbUpdateParticipantTime(id, startTime, finishTime);
-    revalidatePath("/");
+export async function updateParticipantTime(
+  id: string,
+  startTime: number,
+  finishTime: number
+) {
+  await dbUpdateParticipantTime(id, startTime, finishTime);
+  revalidatePath("/");
 }
 
 // Category Actions
@@ -72,110 +89,127 @@ const categorySchema = z.object({
   distance: z.enum(["5k", "10k", "21k", "42k"]),
 });
 
-export async function addCategory(categoryData: z.infer<typeof categorySchema>) {
-    const validatedData = categorySchema.parse(categoryData);
-    await dbAddCategory(validatedData);
-    revalidatePath("/categories");
-    revalidatePath("/"); // Also revalidate participants page in case categories change
+export async function addCategory(
+  categoryData: z.infer<typeof categorySchema>
+) {
+  const validatedData = categorySchema.parse(categoryData);
+  await dbAddCategory(validatedData);
+  revalidatePath("/categories");
+  revalidatePath("/"); // Also revalidate participants page in case categories change
 }
 
 export async function updateCategory(category: Category) {
-    const validatedData = categorySchema.parse(category);
-    await dbUpdateCategory({id: category.id, ...validatedData});
-    revalidatePath("/categories");
-    revalidatePath("/");
+  const validatedData = categorySchema.parse(category);
+  await dbUpdateCategory({ id: category.id, ...validatedData });
+  revalidatePath("/categories");
+  revalidatePath("/");
 }
 
 export async function deleteCategory(id: string) {
-    await dbDeleteCategory(id);
-    revalidatePath("/categories");
-    revalidatePath("/");
+  await dbDeleteCategory(id);
+  revalidatePath("/categories");
+  revalidatePath("/");
 }
 
 export async function bulkDeleteCategories(ids: string[]) {
-    await dbBulkDeleteCategories(ids);
-    revalidatePath("/categories");
-    revalidatePath("/");
+  await dbBulkDeleteCategories(ids);
+  revalidatePath("/categories");
+  revalidatePath("/");
 }
 
 const bulkCategorySchema = z.object({
-  ageRanges: z.array(z.object({
-    min: z.coerce.number().int().min(0),
-    max: z.coerce.number().int().min(0),
-  })).min(1).refine(
-    (ranges) => {
-      const sortedRanges = [...ranges].sort((a, b) => a.min - b.min);
-      for (let i = 0; i < sortedRanges.length - 1; i++) {
-        if (sortedRanges[i].max >= sortedRanges[i + 1].min) {
-          return false; // Overlap detected
+  ageRanges: z
+    .array(
+      z.object({
+        min: z.coerce.number().int().min(0),
+        max: z.coerce.number().int().min(0),
+      })
+    )
+    .min(1)
+    .refine(
+      (ranges) => {
+        const sortedRanges = [...ranges].sort((a, b) => a.min - b.min);
+        for (let i = 0; i < sortedRanges.length - 1; i++) {
+          if (sortedRanges[i].max >= sortedRanges[i + 1].min) {
+            return false; // Overlap detected
+          }
         }
+        return true;
+      },
+      {
+        message: "Los rangos de edad no deben solaparse.",
       }
-      return true;
-    },
-    {
-      message: "Los rangos de edad no deben solaparse.",
-    }
-  ),
+    ),
   distances: z.array(z.string()).min(1),
   genders: z.array(z.string()),
 });
 
-export async function bulkAddCategories(data: z.infer<typeof bulkCategorySchema>) {
-    const validatedData = bulkCategorySchema.parse(data);
-    const { ageRanges, distances } = validatedData;
-    let { genders } = validatedData;
-    
-    if (genders.length === 0) {
-        genders = ['Any'];
+export async function bulkAddCategories(
+  data: z.infer<typeof bulkCategorySchema>
+) {
+  const validatedData = bulkCategorySchema.parse(data);
+  const { ageRanges, distances } = validatedData;
+  let { genders } = validatedData;
+
+  if (genders.length === 0) {
+    genders = ["Any"];
+  }
+
+  const genderMap: Record<string, string> = {
+    Male: "Masculino",
+    Female: "Femenino",
+    Any: "General",
+  };
+
+  for (const ageRange of ageRanges) {
+    for (const distance of distances) {
+      for (const gender of genders) {
+        const genderName = genderMap[gender] || "General";
+        const name = `${genderName} ${ageRange.min}-${ageRange.max} ${distance}`;
+        const newCategory: CategoryInput = {
+          name,
+          minAge: ageRange.min,
+          maxAge: ageRange.max,
+          distance: distance as Category["distance"],
+          gender: gender as Category["gender"],
+        };
+        await dbAddCategory(newCategory);
+      }
     }
+  }
 
-    const genderMap: Record<string, string> = {
-        'Male': 'Masculino',
-        'Female': 'Femenino',
-        'Any': 'General'
-    };
-
-    for (const ageRange of ageRanges) {
-        for (const distance of distances) {
-            for (const gender of genders) {
-                const genderName = genderMap[gender] || 'General';
-                const name = `${genderName} ${ageRange.min}-${ageRange.max} ${distance}`;
-                const newCategory: CategoryInput = {
-                    name,
-                    minAge: ageRange.min,
-                    maxAge: ageRange.max,
-                    distance: distance as Category['distance'],
-                    gender: gender as Category['gender'],
-                };
-                await dbAddCategory(newCategory);
-            }
-        }
-    }
-
-    revalidatePath("/categories");
-    revalidatePath("/");
+  revalidatePath("/categories");
+  revalidatePath("/");
 }
 
 const serverImportParticipantSchema = z.object({
-    bibNumber: z.string().min(1),
-    name: z.string().min(1),
-    surname: z.string().min(1),
-    dni: z.string().min(1),
-    birthDate: z.string().optional(),
-    age: z.coerce.number().int().min(0).optional(),
-    gender: z.enum(['Male', 'Female', 'Other']),
-    distance: z.enum(['5k', '10k', '21k', '42k']),
-    city: z.string().optional(),
-    province: z.string().optional(),
-    country: z.string().optional(),
+  bibNumber: z.string().min(1),
+  name: z.string().min(1),
+  surname: z.string().min(1),
+  dni: z.string().min(1),
+  birthDate: z.string().optional(),
+  age: z.coerce.number().int().min(0).optional(),
+  gender: z.enum(["Male", "Female", "Other"]),
+  distance: z.enum(["5k", "10k", "21k", "42k"]),
+  city: z.string().optional(),
+  province: z.string().optional(),
+  country: z.string().optional(),
 });
 
-
-export async function importParticipants(participants: z.infer<typeof serverImportParticipantSchema>[], raceDate: Date, ageCalculationMethod: AgeCalculationMethod) {
+export async function importParticipants(
+  participants: z.infer<typeof serverImportParticipantSchema>[],
+  raceDate: Date,
+  ageCalculationMethod: AgeCalculationMethod
+) {
   const categories = await dbGetCategories();
-  
-  const participantsToCreate = participants.map(p => {
-    const categoryId = assignCategory(p, categories, raceDate, ageCalculationMethod);
+
+  const participantsToCreate = participants.map((p) => {
+    const categoryId = assignCategory(
+      p,
+      categories,
+      raceDate,
+      ageCalculationMethod
+    );
     const chipNumber = generateChipNumber(p.bibNumber);
     return {
       ...p,
@@ -189,9 +223,7 @@ export async function importParticipants(participants: z.infer<typeof serverImpo
   }
 
   await dbImportParticipants(participantsToCreate);
-  
+
   revalidatePath("/");
   return { count: participantsToCreate.length };
 }
-
-
