@@ -208,7 +208,12 @@ export function ParticipantsTable({ participants, categories }: { participants: 
         // Auto-mapping logic
         const initialMappings: Record<string, string> = {};
         systemFields.forEach(field => {
-            const foundHeader = headers.find(header => header.toLowerCase().includes(field.label.toLowerCase()) || header.toLowerCase().includes(field.key.toLowerCase()));
+            const foundHeader = headers.find(header => {
+              const normalizedHeader = header.toLowerCase().replace(/ /g, '');
+              const normalizedFieldLabel = field.label.toLowerCase().replace(/ /g, '');
+              const normalizedFieldKey = field.key.toLowerCase().replace(/ /g, '');
+              return normalizedHeader.includes(normalizedFieldLabel) || normalizedHeader.includes(normalizedFieldKey);
+            });
             if (foundHeader) {
                 initialMappings[field.key] = foundHeader;
             }
@@ -236,26 +241,25 @@ export function ParticipantsTable({ participants, categories }: { participants: 
         for(const field of systemFields) {
             const fileHeader = mappings[field.key];
             if (fileHeader && row[fileHeader] !== undefined) {
-                let value = row[fileHeader];
+                let value: any = row[fileHeader];
+                
+                // Smart parsing
                 if (field.key === 'gender') {
                     const genderRaw = String(value).toLowerCase();
                     if (genderRaw.startsWith('m') || genderRaw === 'male' || genderRaw === 'masculino') value = 'Male';
                     else if (genderRaw.startsWith('f') || genderRaw === 'female' || genderRaw === 'femenino') value = 'Female';
                     else value = 'Other';
-                }
-                if (field.key === 'distance') {
-                    const distanceRaw = String(value).toLowerCase();
-                    if (distanceRaw.includes('10')) value = '10k';
+                } else if (field.key === 'distance') {
+                    const distanceRaw = String(value).toLowerCase().replace(/ /g, '');
+                    if (distanceRaw.includes('42')) value = '42k';
                     else if (distanceRaw.includes('21')) value = '21k';
-                    else if (distanceRaw.includes('42')) value = '42k';
+                    else if (distanceRaw.includes('10')) value = '10k';
                     else value = '5k';
-                }
-                if (field.key === 'birthDate' && value instanceof Date) {
+                } else if (field.key === 'birthDate' && value instanceof Date) {
                    value = value.toISOString().split('T')[0];
-                }
-                 if (field.key === 'age' && value) {
-                    value = parseInt(String(value), 10);
-                } else if (field.key !== 'age') {
+                } else if (field.key === 'age' && value) {
+                    value = parseInt(String(value).replace(/\D/g, ''), 10);
+                } else {
                     value = String(value);
                 }
                 participant[field.key] = value;
