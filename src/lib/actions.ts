@@ -13,7 +13,8 @@ import {
   updateCategory as dbUpdateCategory,
   deleteCategory as dbDeleteCategory,
   updateParticipantTime as dbUpdateParticipantTime,
-  bulkDeleteCategories as dbBulkDeleteCategories
+  bulkDeleteCategories as dbBulkDeleteCategories,
+  importParticipants as dbImportParticipants,
 } from "./data";
 import type { Participant, Category, ParticipantInput, CategoryInput, AgeCalculationMethod } from "./types";
 import { calculateAge, generateChipNumber } from "./utils";
@@ -176,27 +177,23 @@ const serverImportParticipantSchema = z.object({
 
 export async function importParticipants(participants: z.infer<typeof serverImportParticipantSchema>[], raceDate: Date, ageCalculationMethod: AgeCalculationMethod) {
   const categories = await dbGetCategories();
-  let count = 0;
   
-  for (const p of participants) {
-    try {
-      // Data is pre-validated on client, here we just ensure type safety for the action's scope
-      const validatedParticipant = serverImportParticipantSchema.parse(p);
-      const categoryId = assignCategory(validatedParticipant, categories, raceDate, ageCalculationMethod);
-      const chipNumber = generateChipNumber(validatedParticipant.bibNumber);
+  const participantsToCreate = participants.map(p => {
+    const categoryId = assignCategory(p, categories, raceDate, ageCalculationMethod);
+    const chipNumber = generateChipNumber(p.bibNumber);
+    return {
+      ...p,
+      categoryId,
+      chipNumber,
+    };
+  });
 
-      await dbAddParticipant({
-        ...validatedParticipant,
-        categoryId,
-        chipNumber,
-      });
-      count++;
-    } catch (error) {
-      console.error("Failed to import participant:", p, error);
-      // Optionally, you could collect and return errors
-    }
+  if (participantsToCreate.length === 0) {
+    return { count: 0 };
   }
 
+  await dbImportParticipants(participantsToCreate);
+  
   revalidatePath("/");
-  return { count };
+  return { count: participantsToCreate.length };
 }

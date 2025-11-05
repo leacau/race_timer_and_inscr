@@ -4,7 +4,7 @@
 import { db } from "./firebase";
 import { 
     collection, 
-    getDocs, 
+    getDocs,
     addDoc, 
     updateDoc, 
     deleteDoc, 
@@ -86,5 +86,20 @@ export async function bulkDeleteCategories(ids: string[]): Promise<void> {
         const docRef = doc(db, "categories", id);
         batch.delete(docRef);
     });
+    await batch.commit();
+}
+
+
+type ParticipantToCreate = ParticipantInput & { categoryId?: string; chipNumber: string };
+
+export async function importParticipants(participants: ParticipantToCreate[]): Promise<void> {
+    const batch = writeBatch(db);
+    const participantsCol = collection(db, "participants");
+
+    participants.forEach(participant => {
+        const docRef = doc(participantsCol);
+        batch.set(docRef, participant);
+    });
+
     await batch.commit();
 }
