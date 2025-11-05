@@ -111,14 +111,14 @@ const systemFields = [
 ];
 
 const importParticipantSchema = z.object({
-  bibNumber: z.string().min(1),
-  name: z.string().min(1),
-  surname: z.string().min(1),
-  dni: z.string().min(1),
+  bibNumber: z.string({required_error: "Required"}).min(1),
+  name: z.string({required_error: "Required"}).min(1),
+  surname: z.string({required_error: "Required"}).min(1),
+  dni: z.string({required_error: "Required"}).min(1),
   birthDate: z.string().optional(),
   age: z.coerce.number().int().min(0).optional(),
-  gender: z.enum(['Male', 'Female', 'Other']),
-  distance: z.enum(['5k', '10k', '21k', '42k']),
+  gender: z.enum(['Male', 'Female', 'Other'], {required_error: "Required"}),
+  distance: z.enum(['5k', '10k', '21k', '42k'], {required_error: "Required"}),
   city: z.string().optional(),
   province: z.string().optional(),
   country: z.string().optional(),
@@ -604,7 +604,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
                                 {field.label}
                                 {field.required && <span className="text-destructive"> *</span>}
                             </Label>
-                            <Select onValueChange={(value) => handleMappingChange(field.key, value)}>
+                            <Select onValueChange={(value) => handleMappingChange(field.key, value)} defaultValue={importState.mappings[field.key]}>
                                 <SelectTrigger>
                                     <SelectValue placeholder="Seleccionar columna..." />
                                 </SelectTrigger>
@@ -628,3 +628,5 @@ export function ParticipantsTable({ participants, categories }: { participants: 
     </div>
   );
 }
+
+    
