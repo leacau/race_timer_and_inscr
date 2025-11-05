@@ -15,7 +15,7 @@ import {
   bulkDeleteCategories as dbBulkDeleteCategories,
   importParticipants as dbImportParticipants,
 } from "./data";
-import type { Participant, Category, ParticipantInput, CategoryInput, AgeCalculationMethod } from "./types";
+import type { Participant, Category, ParticipantInput, AgeCalculationMethod } from "./types";
 import { calculateAge, generateChipNumber } from "./utils";
 
 const assignCategory = (participant: Omit<Participant, "id" | "chipNumber">, categories: Category[], raceDate: Date, ageCalculationMethod: AgeCalculationMethod): string | undefined => {
@@ -38,11 +38,10 @@ const assignCategory = (participant: Omit<Participant, "id" | "chipNumber">, cat
 
 // Participant Actions
 export async function addParticipant(participantData: ParticipantInput & { raceDate: Date, ageCalculationMethod: AgeCalculationMethod }) {
-    const { raceDate, ageCalculationMethod, ...pData } = participantData;
     const categories = await dbGetCategories();
-    const categoryId = assignCategory(pData, categories, raceDate, ageCalculationMethod);
-    const chipNumber = generateChipNumber(pData.bibNumber);
-    await dbAddParticipant({ ...pData, categoryId, chipNumber });
+    const categoryId = assignCategory(participantData, categories, participantData.raceDate, participantData.ageCalculationMethod);
+    const chipNumber = generateChipNumber(participantData.bibNumber);
+    await dbAddParticipant({ ...participantData, categoryId, chipNumber });
     revalidatePath("/");
 }
 
@@ -194,3 +193,5 @@ export async function importParticipants(participants: z.infer<typeof serverImpo
   revalidatePath("/");
   return { count: participantsToCreate.length };
 }
+
+

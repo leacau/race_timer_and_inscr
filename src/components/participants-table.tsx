@@ -51,7 +51,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { MoreVertical, Play, Square, Edit, Trash2, Plus, Upload } from "lucide-react";
-import type { Participant, Category } from "@/lib/types";
+import type { Participant, Category, ParticipantInput } from "@/lib/types";
 import { cn, calculateAge, formatElapsedTime } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { AppContext } from "@/context/app-context";
@@ -112,10 +112,10 @@ const systemFields = [
 ];
 
 const importParticipantSchema = z.object({
-  bibNumber: z.string().min(1, { message: "El dorsal es requerido." }),
-  name: z.string().min(1, { message: "El nombre es requerido." }),
-  surname: z.string().min(1, { message: "El apellido es requerido." }),
-  dni: z.string().min(1, { message: "El DNI/ID es requerido." }),
+  bibNumber: z.string({required_error: "El dorsal es requerido."}).min(1, { message: "El dorsal es requerido." }),
+  name: z.string({required_error: "El nombre es requerido."}).min(1, { message: "El nombre es requerido." }),
+  surname: z.string({required_error: "El apellido es requerido."}).min(1, { message: "El apellido es requerido." }),
+  dni: z.string({required_error: "El DNI/ID es requerido."}).min(1, { message: "El DNI/ID es requerido." }),
   birthDate: z.string().optional(),
   age: z.coerce.number().int().min(0).optional(),
   gender: z.enum(['Male', 'Female', 'Other'], {
@@ -174,17 +174,24 @@ export function ParticipantsTable({ participants, categories }: { participants: 
 
   const onSubmit = async (values: ParticipantFormValues) => {
     try {
-      const payload = { ...values, raceDate: raceDate, ageCalculationMethod };
+      const { id, ...participantData } = values;
+      const payload: ParticipantInput & { raceDate: Date; ageCalculationMethod: 'raceDay' | 'endOfYear' } = {
+          ...participantData,
+          raceDate: raceDate,
+          ageCalculationMethod: ageCalculationMethod
+      };
+
       if (editingParticipant) {
-        await updateParticipant({ ...editingParticipant, ...payload });
-        toast({ title: "Participante Actualizado", description: "El participante ha sido actualizado correctamente." });
+          await updateParticipant({ ...editingParticipant, ...payload });
+          toast({ title: "Participante Actualizado", description: "El participante ha sido actualizado correctamente." });
       } else {
-        await addParticipant(payload);
-        toast({ title: "Participante Añadido", description: "El nuevo participante ha sido añadido correctamente." });
+          await addParticipant(payload);
+          toast({ title: "Participante Añadido", description: "El nuevo participante ha sido añadido correctamente." });
       }
       setOpen(false);
     } catch (error) {
-      toast({ variant: "destructive", title: "Error", description: "No se pudo guardar el participante." });
+        console.error("Error submitting participant:", error)
+        toast({ variant: "destructive", title: "Error", description: "No se pudo guardar el participante." });
     }
   };
 
@@ -249,12 +256,9 @@ export function ParticipantsTable({ participants, categories }: { participants: 
     let validParticipants: (z.infer<typeof importParticipantSchema>)[] = [];
     let validationErrors: { row: number; error: any; data: any }[] = [];
 
-    data.forEach((row, rowIndex) => {
-        // Skip empty rows
-        if (row.every(cell => cell === null || cell === '')) {
-            return;
-        }
-          
+    const dataToProcess = data.filter(row => row.some(cell => cell !== null && cell !== '' && String(cell).trim() !== ''));
+
+    dataToProcess.forEach((row, rowIndex) => {
         const participantData: { [key: string]: any } = {};
         for (const field of systemFields) {
           const fileHeader = mappings[field.key];
@@ -265,9 +269,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
               value = '';
             }
   
-            // Special Parsing Logic
             if (field.key === 'birthDate' && value instanceof Date) {
-              // Correctly format date to YYYY-MM-DD, avoiding timezone issues
               const tzoffset = value.getTimezoneOffset() * 60000;
               value = new Date(value.getTime() - tzoffset).toISOString().split('T')[0];
             } else {
@@ -299,7 +301,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
         if (validationResult.success) {
           validParticipants.push(validationResult.data);
         } else {
-          validationErrors.push({ row: rowIndex + 2, error: validationResult.error.flatten(), data: participantData });
+          validationErrors.push({ row: rowIndex + 2, error: validationResult.error, data: participantData });
         }
       });
   
@@ -309,7 +311,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
         toast({
           variant: "destructive",
           title: `${validationErrors.length} Participante(s) con Errores de Validación`,
-          description: `No se pudieron validar ${validationErrors.length} participantes. Revisa la consola para más detalles.`,
+          description: `No se pudieron validar ${validationErrors.length} de ${dataToProcess.length} participantes. Revisa la consola para más detalles.`,
           duration: 9000,
         });
     }
@@ -319,10 +321,11 @@ export function ParticipantsTable({ participants, categories }: { participants: 
             const result = await importParticipants(validParticipants, raceDate, ageCalculationMethod);
             toast({
                 title: "Importación Exitosa",
-                description: `${result.count} de ${data.length} participante(s) importados correctamente.`,
+                description: `${result.count} de ${dataToProcess.length} participante(s) importados correctamente.`,
             });
             setIsImportMappingOpen(false);
         } catch (error) {
+            console.error("Server import error:", error);
             toast({
                 variant: "destructive",
                 title: "Error de Importación en Servidor",
