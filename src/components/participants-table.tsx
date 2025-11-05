@@ -205,7 +205,16 @@ export function ParticipantsTable({ participants, categories }: { participants: 
         const headers = (json[0] as string[]) || [];
         const dataAsObjects = XLSX.utils.sheet_to_json(worksheet);
 
-        setImportState({ file, headers, data: dataAsObjects, mappings: {} });
+        // Auto-mapping logic
+        const initialMappings: Record<string, string> = {};
+        systemFields.forEach(field => {
+            const foundHeader = headers.find(header => header.toLowerCase().includes(field.label.toLowerCase()) || header.toLowerCase().includes(field.key.toLowerCase()));
+            if (foundHeader) {
+                initialMappings[field.key] = foundHeader;
+            }
+        });
+
+        setImportState({ file, headers, data: dataAsObjects, mappings: initialMappings });
         setIsImportMappingOpen(true);
     };
     reader.readAsArrayBuffer(file);
@@ -268,7 +277,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
         toast({
             variant: "destructive",
             title: "Error de Validación",
-            description: "Algunos participantes no pudieron ser validados. Revisa la consola para más detalles.",
+            description: `No se pudieron validar ${participantsToImport.length - validatedParticipants.length} participantes. Revise la consola para más detalles.`,
         });
         if(validatedParticipants.length === 0) return;
     }
@@ -604,7 +613,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
                                 {field.label}
                                 {field.required && <span className="text-destructive"> *</span>}
                             </Label>
-                            <Select onValueChange={(value) => handleMappingChange(field.key, value)} defaultValue={importState.mappings[field.key]}>
+                            <Select onValueChange={(value) => handleMappingChange(field.key, value)} value={importState.mappings[field.key]}>
                                 <SelectTrigger>
                                     <SelectValue placeholder="Seleccionar columna..." />
                                 </SelectTrigger>
