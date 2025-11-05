@@ -92,7 +92,7 @@ type ParticipantFormValues = z.infer<typeof participantSchema>;
 type ImportState = {
   file: File | null;
   headers: string[];
-  data: any[];
+  data: any[][];
   mappings: Record<string, string>;
 }
 
@@ -200,15 +200,15 @@ export function ParticipantsTable({ participants, categories }: { participants: 
         const workbook = XLSX.read(data, { type: 'array', cellDates: true });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-        const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        const jsonData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
         
-        const headers = (json[0] as string[]) || [];
-        const dataAsObjects = XLSX.utils.sheet_to_json(worksheet);
+        const headers = jsonData[0] || [];
+        const dataRows = jsonData.slice(1);
 
-        // Auto-mapping logic
         const initialMappings: Record<string, string> = {};
         systemFields.forEach(field => {
             const foundHeader = headers.find(header => {
+              if (typeof header !== 'string') return false;
               const normalizedHeader = header.toLowerCase().replace(/ /g, '');
               const normalizedFieldLabel = field.label.toLowerCase().replace(/ /g, '');
               const normalizedFieldKey = field.key.toLowerCase().replace(/ /g, '');
@@ -219,7 +219,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
             }
         });
 
-        setImportState({ file, headers, data: dataAsObjects, mappings: initialMappings });
+        setImportState({ file, headers, data: dataRows, mappings: initialMappings });
         setIsImportMappingOpen(true);
     };
     reader.readAsArrayBuffer(file);
@@ -234,16 +234,20 @@ export function ParticipantsTable({ participants, categories }: { participants: 
   }
   
   const handleProcessImport = async () => {
-    const { data, mappings } = importState;
+    const { data, headers, mappings } = importState;
+
+    const headerIndexMap: Record<string, number> = {};
+    headers.forEach((h, i) => headerIndexMap[h] = i);
     
     const participantsToImport = data.map(row => {
         const participant: { [key: string]: any } = {};
         for(const field of systemFields) {
             const fileHeader = mappings[field.key];
-            if (fileHeader && row[fileHeader] !== undefined) {
-                let value: any = row[fileHeader];
+            if (fileHeader && headerIndexMap[fileHeader] !== undefined) {
+                let value: any = row[headerIndexMap[fileHeader]];
                 
-                // Smart parsing
+                if (value === undefined || value === null) continue;
+
                 if (field.key === 'gender') {
                     const genderRaw = String(value).toLowerCase();
                     if (genderRaw.startsWith('m') || genderRaw === 'male' || genderRaw === 'masculino') value = 'Male';
@@ -275,7 +279,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
             console.error("Validation failed for participant:", p, e);
             return null;
         }
-    }).filter(Boolean);
+    }).filter(p => p !== null && Object.keys(p).length > 0);
 
     if (validatedParticipants.length !== participantsToImport.length) {
         toast({
