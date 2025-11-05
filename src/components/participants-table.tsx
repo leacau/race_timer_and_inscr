@@ -202,7 +202,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
         const worksheet = workbook.Sheets[sheetName];
         const jsonData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
         
-        const headers = jsonData[0] || [];
+        const headers = jsonData[0]?.map(h => String(h).trim()) || [];
         const dataRows = jsonData.slice(1);
 
         const initialMappings: Record<string, string> = {};
@@ -212,7 +212,9 @@ export function ParticipantsTable({ participants, categories }: { participants: 
               const normalizedHeader = header.toLowerCase().replace(/ /g, '');
               const normalizedFieldLabel = field.label.toLowerCase().replace(/ /g, '');
               const normalizedFieldKey = field.key.toLowerCase().replace(/ /g, '');
-              return normalizedHeader.includes(normalizedFieldLabel) || normalizedHeader.includes(normalizedFieldKey);
+
+              // Try matching by label (e.g. 'Dorsal'), then by key (e.g. 'bibNumber')
+              return normalizedHeader.includes(normalizedFieldLabel) || normalizedHeader.includes(normalizedFieldKey) || normalizedFieldLabel.includes(normalizedHeader);
             });
             if (foundHeader) {
                 initialMappings[field.key] = foundHeader;
@@ -239,7 +241,9 @@ export function ParticipantsTable({ participants, categories }: { participants: 
     const headerIndexMap: Record<string, number> = {};
     headers.forEach((h, i) => headerIndexMap[h] = i);
     
-    const participantsToImport = data.map(row => {
+    const participantsToImport = data
+    .filter(row => row.some(cell => cell !== null && cell !== '')) // Filter out empty rows
+    .map(row => {
         const participant: { [key: string]: any } = {};
         for(const field of systemFields) {
             const fileHeader = mappings[field.key];
@@ -249,9 +253,9 @@ export function ParticipantsTable({ participants, categories }: { participants: 
                 if (value === undefined || value === null) continue;
 
                 if (field.key === 'gender') {
-                    const genderRaw = String(value).toLowerCase();
-                    if (genderRaw.startsWith('m') || genderRaw === 'male' || genderRaw === 'masculino') value = 'Male';
-                    else if (genderRaw.startsWith('f') || genderRaw === 'female' || genderRaw === 'femenino') value = 'Female';
+                    const genderRaw = String(value).trim().toLowerCase();
+                    if (genderRaw.startsWith('m') || genderRaw === 'masculino') value = 'Male';
+                    else if (genderRaw.startsWith('f') || genderRaw === 'femenino') value = 'Female';
                     else value = 'Other';
                 } else if (field.key === 'distance') {
                     const distanceRaw = String(value).toLowerCase().replace(/ /g, '');
@@ -266,6 +270,8 @@ export function ParticipantsTable({ participants, categories }: { participants: 
                    value = localISOTime;
                 } else if (field.key === 'age' && value) {
                     value = parseInt(String(value).replace(/\D/g, ''), 10);
+                } else if (field.key === 'dni') {
+                  value = String(value).replace(/\./g, '').trim();
                 } else {
                     value = String(value).trim();
                 }
@@ -273,7 +279,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
             }
         }
         return participant;
-    }).filter(p => Object.keys(p).length > 0);
+    });
 
     const validatedParticipants = participantsToImport.map(p => {
         try {
@@ -293,6 +299,15 @@ export function ParticipantsTable({ participants, categories }: { participants: 
         if(validatedParticipants.length === 0) return;
     }
     
+    if (validatedParticipants.length === 0) {
+      toast({
+            variant: "default",
+            title: "Nada que importar",
+            description: `No se encontraron participantes válidos para importar.`,
+        });
+      return;
+    }
+
     try {
         const result = await importParticipants(validatedParticipants as z.infer<typeof importParticipantSchema>[], raceDate, ageCalculationMethod);
         toast({
