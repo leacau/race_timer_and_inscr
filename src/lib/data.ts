@@ -1,13 +1,12 @@
-
 "use server";
 
 import { db } from "./firebase";
-import { 
-    collection, 
+import {
+    collection,
     getDocs,
-    addDoc, 
-    updateDoc, 
-    deleteDoc, 
+    addDoc,
+    updateDoc,
+    deleteDoc,
     doc,
     query,
     orderBy,
@@ -16,6 +15,10 @@ import {
     getDoc
 } from "firebase/firestore";
 import type { Participant, Category, ParticipantInput, CategoryInput } from "./types";
+
+const removeUndefinedFields = <T extends Record<string, any>>(obj: T) => {
+    return Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined)) as T;
+};
 
 export async function getParticipants(): Promise<Participant[]> {
     const participantsCol = collection(db, "participants");
@@ -35,21 +38,22 @@ export async function getCategories(): Promise<Category[]> {
 
 export async function addParticipant(participant: ParticipantInput & { categoryId?: string, chipNumber: string }): Promise<Participant> {
     const { id, ...dataToSave } = participant as any; // Firestore fails if id is present
-    const docRef = await addDoc(collection(db, "participants"), dataToSave);
-    return { ...dataToSave, id: docRef.id } as Participant;
+    const sanitizedData = removeUndefinedFields(dataToSave);
+    const docRef = await addDoc(collection(db, "participants"), sanitizedData);
+    return { ...sanitizedData, id: docRef.id } as Participant;
 }
 
 export async function updateParticipant(updatedParticipant: Participant): Promise<Participant | null> {
     const participantRef = doc(db, "participants", updatedParticipant.id);
     const { id, ...dataToUpdate } = updatedParticipant;
-    await updateDoc(participantRef, dataToUpdate);
+    const sanitizedData = removeUndefinedFields(dataToUpdate);
+    await updateDoc(participantRef, sanitizedData);
     const updatedDoc = await getDoc(participantRef);
     if(updatedDoc.exists()) {
         return { id: updatedDoc.id, ...updatedDoc.data() } as Participant;
     }
     return null;
 }
-
 
 export async function deleteParticipant(id: string): Promise<void> {
     await deleteDoc(doc(db, "participants", id));
@@ -90,7 +94,6 @@ export async function bulkDeleteCategories(ids: string[]): Promise<void> {
     await batch.commit();
 }
 
-
 type ParticipantToCreate = ParticipantInput & { categoryId?: string; chipNumber: string };
 
 export async function importParticipants(participants: ParticipantToCreate[]): Promise<void> {
@@ -100,11 +103,12 @@ export async function importParticipants(participants: ParticipantToCreate[]): P
     for (let i = 0; i < participants.length; i += batchSize) {
         const batch = writeBatch(db);
         const chunk = participants.slice(i, i + batchSize);
-        
+
         chunk.forEach(participant => {
             const docRef = doc(participantsCol);
             const { id, ...dataToSave } = participant as any;
-            batch.set(docRef, dataToSave);
+            const sanitizedData = removeUndefinedFields(dataToSave);
+            batch.set(docRef, sanitizedData);
         });
 
         await batch.commit();
