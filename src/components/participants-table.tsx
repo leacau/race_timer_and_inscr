@@ -260,17 +260,20 @@ export function ParticipantsTable({ participants, categories }: { participants: 
                     else if (distanceRaw.includes('10')) value = '10k';
                     else value = '5k';
                 } else if (field.key === 'birthDate' && value instanceof Date) {
-                   value = value.toISOString().split('T')[0];
+                   // Adjust for timezone offset
+                   const tzoffset = value.getTimezoneOffset() * 60000;
+                   const localISOTime = new Date(value.getTime() - tzoffset).toISOString().split('T')[0];
+                   value = localISOTime;
                 } else if (field.key === 'age' && value) {
                     value = parseInt(String(value).replace(/\D/g, ''), 10);
                 } else {
-                    value = String(value);
+                    value = String(value).trim();
                 }
                 participant[field.key] = value;
             }
         }
         return participant;
-    });
+    }).filter(p => Object.keys(p).length > 0);
 
     const validatedParticipants = participantsToImport.map(p => {
         try {
@@ -279,7 +282,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
             console.error("Validation failed for participant:", p, e);
             return null;
         }
-    }).filter(p => p !== null && Object.keys(p).length > 0);
+    }).filter(p => p !== null);
 
     if (validatedParticipants.length !== participantsToImport.length) {
         toast({
