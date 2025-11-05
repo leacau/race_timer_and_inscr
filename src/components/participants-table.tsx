@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import React, { useState, useEffect, useContext, useMemo, useRef } from "react";
@@ -111,18 +112,22 @@ const systemFields = [
 ];
 
 const importParticipantSchema = z.object({
-  bibNumber: z.string({required_error: "El dorsal es requerido."}).min(1, "El dorsal es requerido."),
-  name: z.string({required_error: "El nombre es requerido."}).min(1, "El nombre es requerido."),
-  surname: z.string({required_error: "El apellido es requerido."}).min(1, "El apellido es requerido."),
-  dni: z.string({required_error: "El DNI/ID es requerido."}).min(1, "El DNI/ID es requerido."),
+  bibNumber: z.string().min(1, { message: "El dorsal es requerido." }),
+  name: z.string().min(1, { message: "El nombre es requerido." }),
+  surname: z.string().min(1, { message: "El apellido es requerido." }),
+  dni: z.string().min(1, { message: "El DNI/ID es requerido." }),
   birthDate: z.string().optional(),
   age: z.coerce.number().int().min(0).optional(),
-  gender: z.enum(['Male', 'Female', 'Other'], {required_error: "El género es requerido."}),
-  distance: z.enum(['5k', '10k', '21k', '42k'], {required_error: "La distancia es requerida."}),
+  gender: z.enum(['Male', 'Female', 'Other'], {
+    errorMap: () => ({ message: 'El género es requerido (Male, Female, Other).' }),
+  }),
+  distance: z.enum(['5k', '10k', '21k', '42k'], {
+    errorMap: () => ({ message: 'La distancia es requerida (5k, 10k, 21k, 42k).' }),
+  }),
   city: z.string().optional(),
   province: z.string().optional(),
   country: z.string().optional(),
-}).refine(data => (data.birthDate && data.birthDate.trim() !== '') || (data.age !== undefined && data.age >= 0), {
+}).refine(data => (data.birthDate && data.birthDate.trim() !== '') || (data.age !== undefined && !isNaN(data.age) && data.age >= 0), {
   message: "Debe proporcionar la fecha de nacimiento o la edad para cada participante importado.",
   path: ["birthDate"],
 });
@@ -242,9 +247,14 @@ export function ParticipantsTable({ participants, categories }: { participants: 
     headers.forEach((h, i) => headerIndexMap[h] = i);
     
     let validParticipants: (z.infer<typeof importParticipantSchema>)[] = [];
-    let validationErrors: { row: number; error: string; data: any }[] = [];
+    let validationErrors: { row: number; error: any; data: any }[] = [];
 
     data.forEach((row, rowIndex) => {
+      // Skip empty rows
+      if (row.every(cell => cell === null || cell === '')) {
+        return;
+      }
+        
       const participantData: { [key: string]: any } = {};
       for (const field of systemFields) {
         const fileHeader = mappings[field.key];
@@ -289,7 +299,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
       if (validationResult.success) {
         validParticipants.push(validationResult.data);
       } else {
-        validationErrors.push({ row: rowIndex + 2, error: validationResult.error.flatten().formErrors.join(', ') || JSON.stringify(validationResult.error.flatten().fieldErrors), data: participantData });
+        validationErrors.push({ row: rowIndex + 2, error: validationResult.error.flatten(), data: participantData });
       }
     });
 
@@ -297,9 +307,9 @@ export function ParticipantsTable({ participants, categories }: { participants: 
       console.error("Errores de validación:", validationErrors);
       toast({
         variant: "destructive",
-        title: `${validationErrors.length} Participante(s) con Errores`,
-        description: `No se pudieron validar ${validationErrors.length} participantes. Revise la consola para más detalles.`,
-        duration: 5000,
+        title: `${validationErrors.length} Participante(s) con Errores de Validación`,
+        description: `No se pudieron validar ${validationErrors.length} participantes. Revisa la consola para más detalles.`,
+        duration: 9000,
       });
     }
 
@@ -314,7 +324,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
       } catch (error) {
         toast({
           variant: "destructive",
-          title: "Error de Importación",
+          title: "Error de Importación en Servidor",
           description: "No se pudieron guardar los participantes en la base de datos.",
         });
       }
@@ -666,3 +676,4 @@ export function ParticipantsTable({ participants, categories }: { participants: 
     </div>
   );
 }
+
