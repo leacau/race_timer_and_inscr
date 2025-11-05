@@ -128,7 +128,7 @@ const importParticipantSchema = z.object({
   province: z.string().optional(),
   country: z.string().optional(),
 }).refine(data => (data.birthDate && data.birthDate.trim() !== '') || (data.age !== undefined && !isNaN(data.age) && data.age >= 0), {
-  message: "Debe proporcionar la fecha de nacimiento o la edad para cada participante importado.",
+  message: "Debe proporcionar la fecha de nacimiento o la edad.",
   path: ["birthDate"],
 });
 
@@ -250,92 +250,93 @@ export function ParticipantsTable({ participants, categories }: { participants: 
     let validationErrors: { row: number; error: any; data: any }[] = [];
 
     data.forEach((row, rowIndex) => {
-      // Skip empty rows
-      if (row.every(cell => cell === null || cell === '')) {
-        return;
-      }
-        
-      const participantData: { [key: string]: any } = {};
-      for (const field of systemFields) {
-        const fileHeader = mappings[field.key];
-        if (fileHeader && headerIndexMap[fileHeader] !== undefined) {
-          let value: any = row[headerIndexMap[fileHeader]];
-          
-          if (value === undefined || value === null) {
-            value = '';
-          }
-
-          // Special Parsing Logic
-          if (field.key === 'birthDate' && value instanceof Date) {
-            // Correctly format date to YYYY-MM-DD, avoiding timezone issues
-            const tzoffset = value.getTimezoneOffset() * 60000;
-            value = new Date(value.getTime() - tzoffset).toISOString().split('T')[0];
-          } else {
-             value = String(value).trim();
-          }
-
-          if (field.key === 'gender') {
-            const genderRaw = value.toLowerCase();
-            if (genderRaw.startsWith('m') || genderRaw === 'masculino') value = 'Male';
-            else if (genderRaw.startsWith('f') || genderRaw === 'femenino') value = 'Female';
-            else value = 'Other';
-          } else if (field.key === 'distance') {
-            const distanceRaw = value.toLowerCase().replace(/ /g, '');
-            if (distanceRaw.includes('42')) value = '42k';
-            else if (distanceRaw.includes('21')) value = '21k';
-            else if (distanceRaw.includes('10')) value = '10k';
-            else value = '5k';
-          } else if (field.key === 'age') {
-            value = parseInt(value.replace(/\D/g, ''), 10);
-          } else if (field.key === 'dni') {
-            value = value.replace(/[.-]/g, '').trim();
-          }
-          participantData[field.key] = value;
+        // Skip empty rows
+        if (row.every(cell => cell === null || cell === '')) {
+            return;
         }
-      }
-
-      const validationResult = importParticipantSchema.safeParse(participantData);
-      
-      if (validationResult.success) {
-        validParticipants.push(validationResult.data);
-      } else {
-        validationErrors.push({ row: rowIndex + 2, error: validationResult.error.flatten(), data: participantData });
-      }
-    });
+          
+        const participantData: { [key: string]: any } = {};
+        for (const field of systemFields) {
+          const fileHeader = mappings[field.key];
+          if (fileHeader && headerIndexMap[fileHeader] !== undefined) {
+            let value: any = row[headerIndexMap[fileHeader]];
+            
+            if (value === undefined || value === null) {
+              value = '';
+            }
+  
+            // Special Parsing Logic
+            if (field.key === 'birthDate' && value instanceof Date) {
+              // Correctly format date to YYYY-MM-DD, avoiding timezone issues
+              const tzoffset = value.getTimezoneOffset() * 60000;
+              value = new Date(value.getTime() - tzoffset).toISOString().split('T')[0];
+            } else {
+               value = String(value).trim();
+            }
+  
+            if (field.key === 'gender') {
+              const genderRaw = value.toLowerCase();
+              if (genderRaw.startsWith('m') || genderRaw === 'masculino') value = 'Male';
+              else if (genderRaw.startsWith('f') || genderRaw === 'femenino') value = 'Female';
+              else value = 'Other';
+            } else if (field.key === 'distance') {
+              const distanceRaw = value.toLowerCase().replace(/ /g, '');
+              if (distanceRaw.includes('42')) value = '42k';
+              else if (distanceRaw.includes('21')) value = '21k';
+              else if (distanceRaw.includes('10')) value = '10k';
+              else value = '5k';
+            } else if (field.key === 'age') {
+              value = parseInt(value.replace(/\D/g, ''), 10);
+            } else if (field.key === 'dni') {
+              value = value.replace(/[.-]/g, '').trim();
+            }
+            participantData[field.key] = value;
+          }
+        }
+  
+        const validationResult = importParticipantSchema.safeParse(participantData);
+        
+        if (validationResult.success) {
+          validParticipants.push(validationResult.data);
+        } else {
+          validationErrors.push({ row: rowIndex + 2, error: validationResult.error.flatten(), data: participantData });
+        }
+      });
+  
 
     if (validationErrors.length > 0) {
-      console.error("Errores de validación:", validationErrors);
-      toast({
-        variant: "destructive",
-        title: `${validationErrors.length} Participante(s) con Errores de Validación`,
-        description: `No se pudieron validar ${validationErrors.length} participantes. Revisa la consola para más detalles.`,
-        duration: 9000,
-      });
+        console.error("Validation errors:", validationErrors);
+        toast({
+          variant: "destructive",
+          title: `${validationErrors.length} Participante(s) con Errores de Validación`,
+          description: `No se pudieron validar ${validationErrors.length} participantes. Revisa la consola para más detalles.`,
+          duration: 9000,
+        });
     }
 
     if (validParticipants.length > 0) {
-      try {
-        const result = await importParticipants(validParticipants, raceDate, ageCalculationMethod);
-        toast({
-          title: "Importación Exitosa",
-          description: `${result.count} de ${data.length} participante(s) importados correctamente.`,
-        });
-        setIsImportMappingOpen(false);
-      } catch (error) {
-        toast({
-          variant: "destructive",
-          title: "Error de Importación en Servidor",
-          description: "No se pudieron guardar los participantes en la base de datos.",
-        });
-      }
+        try {
+            const result = await importParticipants(validParticipants, raceDate, ageCalculationMethod);
+            toast({
+                title: "Importación Exitosa",
+                description: `${result.count} de ${data.length} participante(s) importados correctamente.`,
+            });
+            setIsImportMappingOpen(false);
+        } catch (error) {
+            toast({
+                variant: "destructive",
+                title: "Error de Importación en Servidor",
+                description: "No se pudieron guardar los participantes en la base de datos.",
+            });
+        }
     } else if (validationErrors.length === 0) {
-      toast({
-        variant: "default",
-        title: "Nada que importar",
-        description: "No se encontraron participantes válidos en el archivo.",
-      });
+        toast({
+            variant: "default",
+            title: "Nada que importar",
+            description: "No se encontraron participantes válidos en el archivo.",
+        });
     }
-  }
+}
 
 
   const toggleTimer = (participant: Participant) => {
@@ -676,4 +677,3 @@ export function ParticipantsTable({ participants, categories }: { participants: 
     </div>
   );
 }
-
