@@ -111,20 +111,22 @@ const systemFields = [
 ];
 
 const importParticipantSchema = z.object({
-  bibNumber: z.string({required_error: "Required"}).min(1),
-  name: z.string({required_error: "Required"}).min(1),
-  surname: z.string({required_error: "Required"}).min(1),
-  dni: z.string({required_error: "Required"}).min(1),
+  bibNumber: z.string({required_error: "El dorsal es requerido."}).min(1, "El dorsal es requerido."),
+  name: z.string({required_error: "El nombre es requerido."}).min(1, "El nombre es requerido."),
+  surname: z.string({required_error: "El apellido es requerido."}).min(1, "El apellido es requerido."),
+  dni: z.string({required_error: "El DNI/ID es requerido."}).min(1, "El DNI/ID es requerido."),
   birthDate: z.string().optional(),
   age: z.coerce.number().int().min(0).optional(),
-  gender: z.enum(['Male', 'Female', 'Other'], {required_error: "Required"}),
-  distance: z.enum(['5k', '10k', '21k', '42k'], {required_error: "Required"}),
+  gender: z.enum(['Male', 'Female', 'Other'], {required_error: "El género es requerido."}),
+  distance: z.enum(['5k', '10k', '21k', '42k'], {required_error: "La distancia es requerida."}),
   city: z.string().optional(),
   province: z.string().optional(),
   country: z.string().optional(),
 }).refine(data => (data.birthDate && data.birthDate.trim() !== '') || (data.age !== undefined && data.age >= 0), {
   message: "Debe proporcionar la fecha de nacimiento o la edad para cada participante importado.",
+  path: ["birthDate"],
 });
+
 
 export function ParticipantsTable({ participants, categories }: { participants: Participant[]; categories: Category[] }) {
   const { toast } = useToast();
@@ -202,13 +204,13 @@ export function ParticipantsTable({ participants, categories }: { participants: 
         const worksheet = workbook.Sheets[sheetName];
         const jsonData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
         
-        const headers = jsonData[0]?.map(h => String(h).trim()) || [];
-        const dataRows = jsonData.slice(1);
+        const headers = jsonData[0]?.map(h => String(h ?? '').trim()) || [];
+        const dataRows = jsonData.slice(1).filter(row => row.some(cell => cell !== null && cell !== ''));
 
         const initialMappings: Record<string, string> = {};
         systemFields.forEach(field => {
             const foundHeader = headers.find(header => {
-              if (typeof header !== 'string') return false;
+              if (!header) return false;
               const normalizedHeader = header.toLowerCase().replace(/ /g, '');
               const normalizedFieldLabel = field.label.toLowerCase().replace(/ /g, '');
               const normalizedFieldKey = field.key.toLowerCase().replace(/ /g, '');
@@ -224,7 +226,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
         setIsImportMappingOpen(true);
     };
     reader.readAsArrayBuffer(file);
-    event.target.value = ''; // Reset file input
+    event.target.value = '';
   };
   
   const handleMappingChange = (systemField: string, fileHeader: string) => {
@@ -240,13 +242,9 @@ export function ParticipantsTable({ participants, categories }: { participants: 
     headers.forEach((h, i) => headerIndexMap[h] = i);
     
     let validParticipants: (z.infer<typeof importParticipantSchema>)[] = [];
-    let validationErrors: { row: number; errors: z.ZodIssue[]; data: any }[] = [];
+    let validationErrors: { row: number; error: string; data: any }[] = [];
 
     data.forEach((row, rowIndex) => {
-      if (row.every(cell => cell === null || cell === '')) {
-        return;
-      }
-
       const participantData: { [key: string]: any } = {};
       for (const field of systemFields) {
         const fileHeader = mappings[field.key];
@@ -257,11 +255,13 @@ export function ParticipantsTable({ participants, categories }: { participants: 
             value = '';
           }
 
+          // Special Parsing Logic
           if (field.key === 'birthDate' && value instanceof Date) {
+            // Correctly format date to YYYY-MM-DD, avoiding timezone issues
             const tzoffset = value.getTimezoneOffset() * 60000;
             value = new Date(value.getTime() - tzoffset).toISOString().split('T')[0];
           } else {
-            value = String(value).trim();
+             value = String(value).trim();
           }
 
           if (field.key === 'gender') {
@@ -278,7 +278,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
           } else if (field.key === 'age') {
             value = parseInt(value.replace(/\D/g, ''), 10);
           } else if (field.key === 'dni') {
-            value = value.replace(/\./g, '').trim();
+            value = value.replace(/[.-]/g, '').trim();
           }
           participantData[field.key] = value;
         }
@@ -289,7 +289,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
       if (validationResult.success) {
         validParticipants.push(validationResult.data);
       } else {
-        validationErrors.push({ row: rowIndex + 2, errors: validationResult.error.issues, data: participantData });
+        validationErrors.push({ row: rowIndex + 2, error: validationResult.error.flatten().formErrors.join(', ') || JSON.stringify(validationResult.error.flatten().fieldErrors), data: participantData });
       }
     });
 
@@ -297,8 +297,8 @@ export function ParticipantsTable({ participants, categories }: { participants: 
       console.error("Errores de validación:", validationErrors);
       toast({
         variant: "destructive",
-        title: "Errores de Validación",
-        description: `${validationErrors.length} participante(s) tienen errores. Revise la consola para más detalles.`,
+        title: `${validationErrors.length} Participante(s) con Errores`,
+        description: `No se pudieron validar ${validationErrors.length} participantes. Revise la consola para más detalles.`,
         duration: 5000,
       });
     }
@@ -308,7 +308,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
         const result = await importParticipants(validParticipants, raceDate, ageCalculationMethod);
         toast({
           title: "Importación Exitosa",
-          description: `${result.count} participante(s) importados correctamente.`,
+          description: `${result.count} de ${data.length} participante(s) importados correctamente.`,
         });
         setIsImportMappingOpen(false);
       } catch (error) {
