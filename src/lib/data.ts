@@ -93,13 +93,18 @@ export async function bulkDeleteCategories(ids: string[]): Promise<void> {
 type ParticipantToCreate = ParticipantInput & { categoryId?: string; chipNumber: string };
 
 export async function importParticipants(participants: ParticipantToCreate[]): Promise<void> {
-    const batch = writeBatch(db);
     const participantsCol = collection(db, "participants");
+    const batchSize = 500; // Firestore batch limit
 
-    participants.forEach(participant => {
-        const docRef = doc(participantsCol);
-        batch.set(docRef, participant);
-    });
+    for (let i = 0; i < participants.length; i += batchSize) {
+        const batch = writeBatch(db);
+        const chunk = participants.slice(i, i + batchSize);
+        
+        chunk.forEach(participant => {
+            const docRef = doc(participantsCol);
+            batch.set(docRef, participant);
+        });
 
-    await batch.commit();
+        await batch.commit();
+    }
 }
