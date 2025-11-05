@@ -82,9 +82,9 @@ const participantSchema = z.object({
   city: z.string().optional(),
   province: z.string().optional(),
   country: z.string().optional(),
-}).refine(data => !!data.birthDate || (data.age !== undefined && data.age >= 0), {
+}).refine(data => (data.birthDate && data.birthDate.trim() !== '') || (data.age !== undefined && data.age >= 0), {
   message: "Debe proporcionar la fecha de nacimiento o la edad.",
-  path: ["birthDate"], // Show error on one of the fields
+  path: ["birthDate"],
 });
 
 type ParticipantFormValues = z.infer<typeof participantSchema>;
@@ -122,7 +122,7 @@ const importParticipantSchema = z.object({
   city: z.string().optional(),
   province: z.string().optional(),
   country: z.string().optional(),
-}).refine(data => !!data.birthDate || (data.age !== undefined && data.age >= 0), {
+}).refine(data => (data.birthDate && data.birthDate.trim() !== '') || (data.age !== undefined && data.age >= 0), {
   message: "Debe proporcionar la fecha de nacimiento o la edad para cada participante importado.",
 });
 
@@ -213,7 +213,6 @@ export function ParticipantsTable({ participants, categories }: { participants: 
               const normalizedFieldLabel = field.label.toLowerCase().replace(/ /g, '');
               const normalizedFieldKey = field.key.toLowerCase().replace(/ /g, '');
 
-              // Try matching by label (e.g. 'Dorsal'), then by key (e.g. 'bibNumber')
               return normalizedHeader.includes(normalizedFieldLabel) || normalizedHeader.includes(normalizedFieldKey) || normalizedFieldLabel.includes(normalizedHeader);
             });
             if (foundHeader) {
@@ -237,92 +236,94 @@ export function ParticipantsTable({ participants, categories }: { participants: 
   
   const handleProcessImport = async () => {
     const { data, headers, mappings } = importState;
-
     const headerIndexMap: Record<string, number> = {};
     headers.forEach((h, i) => headerIndexMap[h] = i);
     
     let validParticipants: (z.infer<typeof importParticipantSchema>)[] = [];
-    const validationErrors: { row: number; errors: z.ZodIssue[] }[] = [];
+    let validationErrors: { row: number; errors: z.ZodIssue[]; data: any }[] = [];
 
     data.forEach((row, rowIndex) => {
-      // Skip empty rows
       if (row.every(cell => cell === null || cell === '')) {
-          return;
+        return;
       }
-      const participant: { [key: string]: any } = {};
-      
-      for (const field of systemFields) {
-          const fileHeader = mappings[field.key];
-          if (fileHeader && headerIndexMap[fileHeader] !== undefined) {
-              let value: any = row[headerIndexMap[fileHeader]];
-              
-              if (value === undefined || value === null) continue;
 
-              if (field.key === 'gender') {
-                  const genderRaw = String(value).trim().toLowerCase();
-                  if (genderRaw.startsWith('m') || genderRaw === 'masculino') value = 'Male';
-                  else if (genderRaw.startsWith('f') || genderRaw === 'femenino') value = 'Female';
-                  else value = 'Other';
-              } else if (field.key === 'distance') {
-                  const distanceRaw = String(value).toLowerCase().replace(/ /g, '');
-                  if (distanceRaw.includes('42')) value = '42k';
-                  else if (distanceRaw.includes('21')) value = '21k';
-                  else if (distanceRaw.includes('10')) value = '10k';
-                  else value = '5k';
-              } else if (field.key === 'birthDate' && value instanceof Date) {
-                 const tzoffset = value.getTimezoneOffset() * 60000;
-                 const localISOTime = new Date(value.getTime() - tzoffset).toISOString().split('T')[0];
-                 value = localISOTime;
-              } else if (field.key === 'age' && value) {
-                  value = parseInt(String(value).replace(/\D/g, ''), 10);
-              } else if (field.key === 'dni') {
-                value = String(value).replace(/\./g, '').trim();
-              } else {
-                  value = String(value).trim();
-              }
-              participant[field.key] = value;
+      const participantData: { [key: string]: any } = {};
+      for (const field of systemFields) {
+        const fileHeader = mappings[field.key];
+        if (fileHeader && headerIndexMap[fileHeader] !== undefined) {
+          let value: any = row[headerIndexMap[fileHeader]];
+          
+          if (value === undefined || value === null) {
+            value = '';
           }
+
+          if (field.key === 'birthDate' && value instanceof Date) {
+            const tzoffset = value.getTimezoneOffset() * 60000;
+            value = new Date(value.getTime() - tzoffset).toISOString().split('T')[0];
+          } else {
+            value = String(value).trim();
+          }
+
+          if (field.key === 'gender') {
+            const genderRaw = value.toLowerCase();
+            if (genderRaw.startsWith('m') || genderRaw === 'masculino') value = 'Male';
+            else if (genderRaw.startsWith('f') || genderRaw === 'femenino') value = 'Female';
+            else value = 'Other';
+          } else if (field.key === 'distance') {
+            const distanceRaw = value.toLowerCase().replace(/ /g, '');
+            if (distanceRaw.includes('42')) value = '42k';
+            else if (distanceRaw.includes('21')) value = '21k';
+            else if (distanceRaw.includes('10')) value = '10k';
+            else value = '5k';
+          } else if (field.key === 'age') {
+            value = parseInt(value.replace(/\D/g, ''), 10);
+          } else if (field.key === 'dni') {
+            value = value.replace(/\./g, '').trim();
+          }
+          participantData[field.key] = value;
+        }
       }
-      
-      const validationResult = importParticipantSchema.safeParse(participant);
+
+      const validationResult = importParticipantSchema.safeParse(participantData);
       
       if (validationResult.success) {
-          validParticipants.push(validationResult.data);
+        validParticipants.push(validationResult.data);
       } else {
-          validationErrors.push({ row: rowIndex + 2, errors: validationResult.error.issues });
+        validationErrors.push({ row: rowIndex + 2, errors: validationResult.error.issues, data: participantData });
       }
     });
 
     if (validationErrors.length > 0) {
-        console.error("Errores de validación durante la importación:", validationErrors);
-        toast({
-            variant: "destructive",
-            title: "Errores de Validación",
-            description: `${validationErrors.length} participante(s) no pudieron ser validados. Revisa la consola para más detalles.`,
-        });
+      console.error("Errores de validación:", validationErrors);
+      toast({
+        variant: "destructive",
+        title: "Errores de Validación",
+        description: `${validationErrors.length} participante(s) tienen errores. Revise la consola para más detalles.`,
+        duration: 5000,
+      });
     }
 
     if (validParticipants.length > 0) {
-        try {
-            const result = await importParticipants(validParticipants, raceDate, ageCalculationMethod);
-            toast({
-                title: "Importación Exitosa",
-                description: `${result.count} participante(s) importados.`
-            });
-            setIsImportMappingOpen(false);
-        } catch (error) {
-            toast({
-                variant: "destructive",
-                title: "Error de Importación",
-                description: "No se pudieron importar los participantes.",
-            });
-        }
-    } else if (validationErrors.length === 0) {
+      try {
+        const result = await importParticipants(validParticipants, raceDate, ageCalculationMethod);
         toast({
-            variant: "default",
-            title: "Nada que importar",
-            description: `No se encontraron participantes válidos para importar.`,
+          title: "Importación Exitosa",
+          description: `${result.count} participante(s) importados correctamente.`,
         });
+        setIsImportMappingOpen(false);
+      } catch (error) {
+        toast({
+          variant: "destructive",
+          title: "Error de Importación",
+          description: "No se pudieron guardar los participantes en la base de datos.",
+        });
+      }
+    } else if (validationErrors.length === 0) {
+      toast({
+        variant: "default",
+        title: "Nada que importar",
+        description: "No se encontraron participantes válidos en el archivo.",
+      });
     }
   }
 
@@ -665,5 +666,3 @@ export function ParticipantsTable({ participants, categories }: { participants: 
     </div>
   );
 }
-
-    
