@@ -4,7 +4,6 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import {
-  getParticipants as dbGetParticipants,
   getCategories as dbGetCategories,
   addParticipant as dbAddParticipant,
   updateParticipant as dbUpdateParticipant,
@@ -51,8 +50,7 @@ export async function updateParticipant(participant: Participant & { raceDate: D
     const { raceDate, ageCalculationMethod, ...pData } = participant;
     const categories = await dbGetCategories();
     const categoryId = assignCategory(pData, categories, raceDate, ageCalculationMethod);
-    const chipNumber = generateChipNumber(pData.bibNumber);
-    await dbUpdateParticipant({ ...pData, categoryId, chipNumber });
+    await dbUpdateParticipant({ ...pData, categoryId });
     revalidatePath("/");
 }
 
@@ -159,19 +157,18 @@ export async function bulkAddCategories(data: z.infer<typeof bulkCategorySchema>
     revalidatePath("/");
 }
 
-// Excel Import Action
 const serverImportParticipantSchema = z.object({
-  bibNumber: z.string().min(1),
-  name: z.string().min(1),
-  surname: z.string().min(1),
-  dni: z.string().min(1),
-  birthDate: z.string().optional(),
-  age: z.coerce.number().int().min(0).optional(),
-  gender: z.enum(['Male', 'Female', 'Other']),
-  distance: z.enum(['5k', '10k', '21k', '42k']),
-  city: z.string().optional(),
-  province: z.string().optional(),
-  country: z.string().optional(),
+    bibNumber: z.string().min(1),
+    name: z.string().min(1),
+    surname: z.string().min(1),
+    dni: z.string().min(1),
+    birthDate: z.string().optional(),
+    age: z.coerce.number().int().min(0).optional(),
+    gender: z.enum(['Male', 'Female', 'Other']),
+    distance: z.enum(['5k', '10k', '21k', '42k']),
+    city: z.string().optional(),
+    province: z.string().optional(),
+    country: z.string().optional(),
 });
 
 

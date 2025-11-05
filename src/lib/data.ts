@@ -34,13 +34,15 @@ export async function getCategories(): Promise<Category[]> {
 }
 
 export async function addParticipant(participant: ParticipantInput & { categoryId?: string, chipNumber: string }): Promise<Participant> {
-    const docRef = await addDoc(collection(db, "participants"), participant);
-    return { ...participant, id: docRef.id };
+    const { id, ...dataToSave } = participant as any; // Firestore fails if id is present
+    const docRef = await addDoc(collection(db, "participants"), dataToSave);
+    return { ...dataToSave, id: docRef.id } as Participant;
 }
 
 export async function updateParticipant(updatedParticipant: Participant): Promise<Participant | null> {
     const participantRef = doc(db, "participants", updatedParticipant.id);
-    await updateDoc(participantRef, updatedParticipant);
+    const { id, ...dataToUpdate } = updatedParticipant;
+    await updateDoc(participantRef, dataToUpdate);
     const updatedDoc = await getDoc(participantRef);
     if(updatedDoc.exists()) {
         return { id: updatedDoc.id, ...updatedDoc.data() } as Participant;
@@ -65,7 +67,6 @@ export async function addCategory(category: CategoryInput): Promise<Category> {
 
 export async function updateCategory(updatedCategory: Category): Promise<Category | null> {
     const categoryRef = doc(db, "categories", updatedCategory.id);
-    // Firestore updateDoc doesn't like the id field in the data object
     const { id, ...dataToUpdate } = updatedCategory;
     await updateDoc(categoryRef, dataToUpdate);
     const updatedDoc = await getDoc(categoryRef);
@@ -102,7 +103,8 @@ export async function importParticipants(participants: ParticipantToCreate[]): P
         
         chunk.forEach(participant => {
             const docRef = doc(participantsCol);
-            batch.set(docRef, participant);
+            const { id, ...dataToSave } = participant as any;
+            batch.set(docRef, dataToSave);
         });
 
         await batch.commit();
