@@ -174,7 +174,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
   const onSubmit = async (values: ParticipantFormValues) => {
     try {
       if (editingParticipant) {
-          const payload: Participant & { raceDate: Date; ageCalculationMethod: 'raceDay' | 'endOfYear'; } = {
+          const payload = {
              ...editingParticipant, 
              ...values, 
              raceDate, 

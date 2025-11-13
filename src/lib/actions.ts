@@ -29,11 +29,11 @@ const assignCategory = (
   raceDate: Date,
   ageCalculationMethod: AgeCalculationMethod
 ): string | undefined => {
-  let age: number | null;
-
+  let age: number | null = null;
+  
   if (participant.age !== undefined && participant.age !== null) {
       age = participant.age;
-  } else {
+  } else if (participant.birthDate) {
       age = calculateAge(participant.birthDate, raceDate, ageCalculationMethod);
   }
 

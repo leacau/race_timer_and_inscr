@@ -16,7 +16,6 @@ import {
 } from "firebase/firestore";
 import type { Participant, Category, ParticipantInput, CategoryInput } from "./types";
 
-
 export async function getParticipants(): Promise<Participant[]> {
     const participantsCol = collection(db, "participants");
     const q = query(participantsCol, orderBy("bibNumber"));
@@ -38,8 +37,8 @@ export async function addParticipant(participant: Omit<Participant, 'id'>): Prom
     return docRef.id;
 }
 
-export async function updateParticipant(updatedParticipant: Participant): Promise<void> {
-    const { id, ...data } = updatedParticipant;
+export async function updateParticipant(participant: Participant): Promise<void> {
+    const { id, ...data } = participant;
     const participantRef = doc(db, "participants", id);
     await updateDoc(participantRef, data);
 }
