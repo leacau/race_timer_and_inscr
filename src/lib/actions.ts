@@ -43,8 +43,13 @@ const assignCategory = (
 };
 
 // Participant Actions
-export async function addParticipant(participantData: ParticipantInput) {
-  await dbAddParticipant(participantData);
+export async function addParticipant(participantData: ParticipantInput & { raceDate: Date; ageCalculationMethod: AgeCalculationMethod; }) {
+  const { raceDate, ageCalculationMethod, ...pData } = participantData;
+  const categories = await dbGetCategories();
+  const categoryId = assignCategory(pData, categories, raceDate, ageCalculationMethod);
+  const chipNumber = generateChipNumber(pData.bibNumber);
+
+  await dbAddParticipant({ ...pData, categoryId, chipNumber });
   revalidatePath("/");
 }
 

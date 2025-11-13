@@ -112,10 +112,10 @@ const systemFields = [
 ];
 
 const importParticipantSchema = z.object({
-  bibNumber: z.string({required_error: "El dorsal es requerido."}).min(1, { message: "El dorsal es requerido." }),
-  name: z.string({required_error: "El nombre es requerido."}).min(1, { message: "El nombre es requerido." }),
-  surname: z.string({required_error: "El apellido es requerido."}).min(1, { message: "El apellido es requerido." }),
-  dni: z.string({required_error: "El DNI/ID es requerido."}).min(1, { message: "El DNI/ID es requerido." }),
+  bibNumber: z.string().min(1, { message: "El dorsal es requerido." }),
+  name: z.string().min(1, { message: "El nombre es requerido." }),
+  surname: z.string().min(1, { message: "El apellido es requerido." }),
+  dni: z.string().min(1, { message: "El DNI/ID es requerido." }),
   birthDate: z.string().optional(),
   age: z.coerce.number().int().min(0).optional(),
   gender: z.enum(['Male', 'Female', 'Other'], {
@@ -175,7 +175,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
   const onSubmit = async (values: ParticipantFormValues) => {
     try {
       const { id, ...participantData } = values;
-      const payload: ParticipantInput & { raceDate: Date; ageCalculationMethod: 'raceDay' | 'endOfYear' } = {
+      const payload = {
           ...participantData,
           raceDate: raceDate,
           ageCalculationMethod: ageCalculationMethod
