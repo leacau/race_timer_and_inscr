@@ -29,10 +29,11 @@ const assignCategory = (
   raceDate: Date,
   ageCalculationMethod: AgeCalculationMethod
 ): string | undefined => {
-  let age: number | null = null;
+  let age: number | null;
+
   if (participant.age !== undefined && participant.age !== null) {
       age = participant.age;
-  } else if (participant.birthDate) {
+  } else {
       age = calculateAge(participant.birthDate, raceDate, ageCalculationMethod);
   }
 
@@ -58,7 +59,15 @@ export async function addParticipant(participantData: ParticipantInput & { raceD
   const categoryId = assignCategory(pData, categories, raceDate, ageCalculationMethod);
   const chipNumber = generateChipNumber(pData.bibNumber);
 
-  await dbAddParticipant({ ...pData, categoryId, chipNumber });
+  const participantToSave: Omit<Participant, 'id'> = {
+    ...pData,
+    categoryId,
+    chipNumber,
+    startTime: null,
+    finishTime: null,
+  };
+  
+  await dbAddParticipant(participantToSave);
   revalidatePath("/");
 }
 
@@ -76,7 +85,9 @@ export async function updateParticipant(
     raceDate,
     ageCalculationMethod
   );
-  await dbUpdateParticipant({ ...pData, categoryId });
+  
+  const participantToUpdate: Participant = { ...pData, categoryId };
+  await dbUpdateParticipant(participantToUpdate);
   revalidatePath("/");
 }
 
@@ -127,8 +138,8 @@ export async function deleteCategory(id: string) {
 
 export async function bulkDeleteCategories(ids: string[]) {
   await dbBulkDeleteCategories(ids);
-revalidatePath("/categories");
-revalidatePath("/");
+  revalidatePath("/categories");
+  revalidatePath("/");
 }
 
 const bulkCategorySchema = z.object({

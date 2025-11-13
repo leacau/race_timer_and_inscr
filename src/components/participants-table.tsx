@@ -174,7 +174,12 @@ export function ParticipantsTable({ participants, categories }: { participants: 
   const onSubmit = async (values: ParticipantFormValues) => {
     try {
       if (editingParticipant) {
-          const payload = { ...editingParticipant, ...values, raceDate, ageCalculationMethod};
+          const payload: Participant & { raceDate: Date; ageCalculationMethod: 'raceDay' | 'endOfYear'; } = {
+             ...editingParticipant, 
+             ...values, 
+             raceDate, 
+             ageCalculationMethod
+          };
           await updateParticipant(payload);
           toast({ title: "Participante Actualizado", description: "El participante ha sido actualizado correctamente." });
       } else {
@@ -410,7 +415,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
         </TableCell>
         <TableCell>
           <div className={cn("font-mono text-lg", isRunning && "text-accent-foreground animate-pulse")}>
-            {formatElapsedTime(timer?.elapsed ?? p.finishTime ? p.finishTime - (p.startTime ?? 0) : 0)}
+            {formatElapsedTime(timer?.elapsed ?? (p.finishTime && p.startTime ? p.finishTime - p.startTime : 0))}
           </div>
         </TableCell>
         <TableCell className="text-right">
@@ -481,7 +486,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
           </div>
           <div className="flex items-center justify-between mt-4">
              <div className={cn("font-mono text-2xl", isRunning && "text-accent-foreground animate-pulse")}>
-              {formatElapsedTime(timer?.elapsed ?? p.finishTime ? p.finishTime - (p.startTime ?? 0) : 0)}
+              {formatElapsedTime(timer?.elapsed ?? (p.finishTime && p.startTime ? p.finishTime - p.startTime : 0))}
             </div>
             {isAdmin && (
               <Button 

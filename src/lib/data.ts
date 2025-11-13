@@ -33,55 +33,15 @@ export async function getCategories(): Promise<Category[]> {
     return categoryList;
 }
 
-export async function addParticipant(participant: ParticipantInput & { categoryId?: string, chipNumber: string }): Promise<string> {
-    
-    const dataToSave: { [key: string]: any } = {
-        bibNumber: participant.bibNumber,
-        name: participant.name,
-        surname: participant.surname,
-        dni: participant.dni,
-        gender: participant.gender,
-        distance: participant.distance,
-        chipNumber: participant.chipNumber,
-        startTime: null,
-        finishTime: null,
-    };
-
-    if (participant.birthDate) dataToSave.birthDate = participant.birthDate;
-    if (participant.age !== undefined) dataToSave.age = participant.age;
-    if (participant.categoryId) dataToSave.categoryId = participant.categoryId;
-    if (participant.city) dataToSave.city = participant.city;
-    if (participant.province) dataToSave.province = participant.province;
-    if (participant.country) dataToSave.country = participant.country;
-    
-    const docRef = await addDoc(collection(db, "participants"), dataToSave);
+export async function addParticipant(participant: Omit<Participant, 'id'>): Promise<string> {
+    const docRef = await addDoc(collection(db, "participants"), participant);
     return docRef.id;
 }
 
 export async function updateParticipant(updatedParticipant: Participant): Promise<void> {
     const { id, ...data } = updatedParticipant;
     const participantRef = doc(db, "participants", id);
-    
-    const dataToSave: { [key: string]: any } = {
-        bibNumber: data.bibNumber,
-        name: data.name,
-        surname: data.surname,
-        dni: data.dni,
-        gender: data.gender,
-        distance: data.distance,
-        chipNumber: data.chipNumber,
-    };
-
-    if (data.birthDate) dataToSave.birthDate = data.birthDate;
-    if (data.age !== undefined) dataToSave.age = data.age;
-    if (data.categoryId) dataToSave.categoryId = data.categoryId;
-    if (data.city) dataToSave.city = data.city;
-    if (data.province) dataToSave.province = data.province;
-    if (data.country) dataToSave.country = data.country;
-    if (data.startTime) dataToSave.startTime = data.startTime;
-    if (data.finishTime) dataToSave.finishTime = data.finishTime;
-
-    await updateDoc(participantRef, dataToSave);
+    await updateDoc(participantRef, data);
 }
 
 export async function deleteParticipant(id: string): Promise<void> {
@@ -135,26 +95,11 @@ export async function importParticipants(participants: ParticipantToCreate[]): P
 
         for (const participant of chunk) {
             const docRef = doc(participantsCol);
-            const { bibNumber, name, surname, dni, gender, distance, chipNumber, birthDate, age, categoryId, city, province, country } = participant;
-            const dataToSave: { [key: string]: any } = {
-                bibNumber,
-                name,
-                surname,
-                dni,
-                gender,
-                distance,
-                chipNumber,
+            const dataToSave: Omit<Participant, 'id'> = {
+                ...participant,
                 startTime: null,
                 finishTime: null,
             };
-
-            if (birthDate) dataToSave.birthDate = birthDate;
-            if (age !== undefined) dataToSave.age = age;
-            if (categoryId) dataToSave.categoryId = categoryId;
-            if (city) dataToSave.city = city;
-            if (province) dataToSave.province = province;
-            if (country) dataToSave.country = country;
-            
             batch.set(docRef, dataToSave);
         }
         await batch.commit();

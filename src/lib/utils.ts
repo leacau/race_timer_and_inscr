@@ -12,12 +12,6 @@ export function calculateAge(birthDate: string | undefined | null, raceDate: Dat
   try {
     const referenceDate = method === 'endOfYear' ? endOfYear(raceDate) : raceDate;
     
-    // Handle Excel date serial numbers which can sometimes be parsed as numbers
-    if (typeof birthDate === 'number') {
-      const excelEpoch = new Date(Date.UTC(1900, 0, birthDate - 1));
-      return differenceInYears(referenceDate, excelEpoch);
-    }
-    
     const bd = new Date(birthDate);
     // Check for invalid date
     if (isNaN(bd.getTime())) return null;
