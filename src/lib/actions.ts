@@ -19,7 +19,7 @@ import type { AgeCalculationMethod, Category, CategoryInput, Participant, Partic
 import { calculateAge, generateChipNumber } from "./utils";
 
 const assignCategory = (
-  participant: Omit<Participant, "id" | "chipNumber">,
+  participant: Omit<Participant, "id" | "chipNumber" | "startTime" | "finishTime">,
   categories: Category[],
   raceDate: Date,
   ageCalculationMethod: AgeCalculationMethod
