@@ -1,3 +1,4 @@
+
 "use server";
 
 import { db } from "./firebase";
@@ -16,9 +17,6 @@ import {
 } from "firebase/firestore";
 import type { Participant, Category, ParticipantInput, CategoryInput } from "./types";
 
-const removeUndefinedFields = <T extends Record<string, any>>(obj: T) => {
-    return Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined)) as T;
-};
 
 export async function getParticipants(): Promise<Participant[]> {
     const participantsCol = collection(db, "participants");
@@ -37,17 +35,52 @@ export async function getCategories(): Promise<Category[]> {
 }
 
 export async function addParticipant(participant: ParticipantInput & { categoryId?: string, chipNumber: string }): Promise<Participant> {
-    const { id, ...dataToSave } = participant as any; // Firestore fails if id is present
-    const sanitizedData = removeUndefinedFields(dataToSave);
-    const docRef = await addDoc(collection(db, "participants"), sanitizedData);
-    return { ...sanitizedData, id: docRef.id } as Participant;
+    const { bibNumber, name, surname, dni, gender, distance, chipNumber, birthDate, age, categoryId, city, province, country } = participant;
+    const dataToSave = {
+        bibNumber,
+        name,
+        surname,
+        dni,
+        gender,
+        distance,
+        chipNumber,
+        ...(birthDate && { birthDate }),
+        ...(age !== undefined && { age }),
+        ...(categoryId && { categoryId }),
+        ...(city && { city }),
+        ...(province && { province }),
+        ...(country && { country }),
+        startTime: null,
+        finishTime: null,
+    };
+    
+    const docRef = await addDoc(collection(db, "participants"), dataToSave);
+    return { ...dataToSave, id: docRef.id } as Participant;
 }
 
 export async function updateParticipant(updatedParticipant: Participant): Promise<Participant | null> {
     const participantRef = doc(db, "participants", updatedParticipant.id);
     const { id, ...dataToUpdate } = updatedParticipant;
-    const sanitizedData = removeUndefinedFields(dataToUpdate);
-    await updateDoc(participantRef, sanitizedData);
+
+    const dataToSave = {
+      bibNumber: dataToUpdate.bibNumber,
+      name: dataToUpdate.name,
+      surname: dataToUpdate.surname,
+      dni: dataToUpdate.dni,
+      gender: dataToUpdate.gender,
+      distance: dataToUpdate.distance,
+      chipNumber: dataToUpdate.chipNumber,
+      ...(dataToUpdate.birthDate && { birthDate: dataToUpdate.birthDate }),
+      ...(dataToUpdate.age !== undefined && { age: dataToUpdate.age }),
+      ...(dataToUpdate.categoryId && { categoryId: dataToUpdate.categoryId }),
+      ...(dataToUpdate.city && { city: dataToUpdate.city }),
+      ...(dataToUpdate.province && { province: dataToUpdate.province }),
+      ...(dataToUpdate.country && { country: dataToUpdate.country }),
+      ...(dataToUpdate.startTime && { startTime: dataToUpdate.startTime }),
+      ...(dataToUpdate.finishTime && { finishTime: dataToUpdate.finishTime }),
+    };
+
+    await updateDoc(participantRef, dataToSave);
     const updatedDoc = await getDoc(participantRef);
     if(updatedDoc.exists()) {
         return { id: updatedDoc.id, ...updatedDoc.data() } as Participant;
@@ -98,19 +131,34 @@ type ParticipantToCreate = ParticipantInput & { categoryId?: string; chipNumber:
 
 export async function importParticipants(participants: ParticipantToCreate[]): Promise<void> {
     const participantsCol = collection(db, "participants");
-    const batchSize = 500; // Firestore batch limit
+    const batchSize = 499;
 
     for (let i = 0; i < participants.length; i += batchSize) {
         const batch = writeBatch(db);
         const chunk = participants.slice(i, i + batchSize);
 
-        chunk.forEach(participant => {
+        for (const participant of chunk) {
             const docRef = doc(participantsCol);
-            const { id, ...dataToSave } = participant as any;
-            const sanitizedData = removeUndefinedFields(dataToSave);
-            batch.set(docRef, sanitizedData);
-        });
-
+            const { bibNumber, name, surname, dni, gender, distance, chipNumber, birthDate, age, categoryId, city, province, country } = participant;
+            const dataToSave = {
+                bibNumber,
+                name,
+                surname,
+                dni,
+                gender,
+                distance,
+                chipNumber,
+                ...(birthDate && { birthDate }),
+                ...(age !== undefined && { age }),
+                ...(categoryId && { categoryId }),
+                ...(city && { city }),
+                ...(province && { province }),
+                ...(country && { country }),
+                startTime: null,
+                finishTime: null,
+            };
+            batch.set(docRef, dataToSave);
+        }
         await batch.commit();
     }
 }
