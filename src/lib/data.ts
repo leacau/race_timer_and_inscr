@@ -61,28 +61,15 @@ export async function addParticipant(participant: ParticipantInput & { categoryI
 
 export async function updateParticipant(updatedParticipant: Participant): Promise<Participant | null> {
     const participantRef = doc(db, "participants", updatedParticipant.id);
-    const { id, ...dataToUpdate } = updatedParticipant;
-
-    const dataToSave: { [key: string]: any } = {
-      bibNumber: dataToUpdate.bibNumber,
-      name: dataToUpdate.name,
-      surname: dataToUpdate.surname,
-      dni: dataToUpdate.dni,
-      gender: dataToUpdate.gender,
-      distance: dataToUpdate.distance,
-      chipNumber: dataToUpdate.chipNumber,
-      startTime: dataToUpdate.startTime ?? null,
-      finishTime: dataToUpdate.finishTime ?? null,
-    };
-
-    if (dataToUpdate.birthDate) dataToSave.birthDate = dataToUpdate.birthDate;
-    if (dataToUpdate.age !== undefined) dataToSave.age = dataToUpdate.age;
-    if (dataToUpdate.categoryId) dataToSave.categoryId = dataToUpdate.categoryId;
-    if (dataToUpdate.city) dataToSave.city = dataToUpdate.city;
-    if (dataToUpdate.province) dataToSave.province = dataToUpdate.province;
-    if (dataToUpdate.country) dataToSave.country = dataToUpdate.country;
+    
+    // Create a copy of the object to avoid modifying the original
+    const dataToSave: { [key: string]: any } = { ...updatedParticipant };
+    
+    // Remove the 'id' field as it should not be saved within the Firestore document itself
+    delete dataToSave.id;
 
     await updateDoc(participantRef, dataToSave);
+
     const updatedDoc = await getDoc(participantRef);
     if(updatedDoc.exists()) {
         return { id: updatedDoc.id, ...updatedDoc.data() } as Participant;
