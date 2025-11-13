@@ -1,5 +1,7 @@
+
 export type AgeCalculationMethod = 'raceDay' | 'endOfYear';
 
+// Tipo de Participante como se lee de Firestore
 export type Participant = {
   id: string;
   bibNumber: string;
@@ -8,18 +10,17 @@ export type Participant = {
   dni: string;
   gender: 'Male' | 'Female' | 'Other';
   distance: '5k' | '10k' | '21k' | '42k';
-  birthDate?: string | null; // YYYY-MM-DD
-  age?: number | null;
-  categoryId?: string | null;
-  startTime?: number | null;
-  finishTime?: number | null;
-  chipNumber?: string | null;
-  city?: string | null;
-  province?: string | null;
-  country?: string | null;
+  birthDate: string; // YYYY-MM-DD - Hacemos que sea requerido para simplificar
+  categoryId: string | null;
+  startTime: number | null;
+  finishTime: number | null;
+  chipNumber: string;
+  city: string | null;
+  province: string | null;
+  country: string | null;
 };
 
-// Type for creating a new participant, from client form or import
+// Tipo para el formulario del cliente y la creación
 export type ParticipantInput = {
   bibNumber: string;
   name: string;
@@ -27,32 +28,14 @@ export type ParticipantInput = {
   dni: string;
   gender: 'Male' | 'Female' | 'Other';
   distance: '5k' | '10k' | '21k' | '42k';
-  birthDate?: string | null;
-  age?: number | null;
-  city?: string | null;
-  province?: string | null;
-  country?: string | null;
+  birthDate: string; // YYYY-MM-DD
+  city?: string;
+  province?: string;
+  country?: string;
 };
 
-// Type for data being written to Firestore, must not have undefined
-export type ParticipantFirestoreData = {
-  bibNumber: string;
-  name: string;
-  surname: string;
-  dni: string;
-  gender: 'Male' | 'Female' | 'Other';
-  distance: '5k' | '10k' | '21k' | '42k';
-  birthDate: string | null;
-  age: number | null;
-  categoryId: string | null;
-  startTime: number | null;
-  finishTime: number | null;
-  chipNumber: string | null;
-  city: string | null;
-  province: string | null;
-  country: string | null;
-}
-
+// Tipo para escribir en Firestore, sin id de documento
+export type ParticipantFirestoreData = Omit<Participant, 'id'>;
 
 export type Category = {
   id: string;

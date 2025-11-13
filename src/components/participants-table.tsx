@@ -75,16 +75,12 @@ const participantSchema = z.object({
   name: z.string().min(1, "El nombre es requerido"),
   surname: z.string().min(1, "El apellido es requerido"),
   dni: z.string().min(1, "El DNI/ID es requerido"),
-  birthDate: z.string().optional(),
-  age: z.coerce.number().int().min(0).optional(),
+  birthDate: z.string().min(1, "La fecha de nacimiento es requerida"),
   gender: z.enum(["Male", "Female", "Other"]),
   distance: z.enum(["5k", "10k", "21k", "42k"]),
   city: z.string().optional(),
   province: z.string().optional(),
   country: z.string().optional(),
-}).refine(data => (data.birthDate && data.birthDate.trim() !== '') || (data.age !== undefined && data.age >= 0), {
-  message: "Debe proporcionar la fecha de nacimiento o la edad.",
-  path: ["birthDate"],
 });
 
 type ParticipantFormValues = z.infer<typeof participantSchema>;
@@ -101,8 +97,7 @@ const systemFields = [
     { key: "name", label: "Nombre", required: true },
     { key: "surname", label: "Apellido", required: true },
     { key: "dni", label: "DNI/ID", required: true },
-    { key: "birthDate", label: "Fecha de Nacimiento", required: false },
-    { key: "age", label: "Edad", required: false },
+    { key: "birthDate", label: "Fecha de Nacimiento", required: true },
     { key: "gender", label: "Género", required: true },
     { key: "distance", label: "Distancia", required: true },
     { key: "city", label: "Ciudad", required: false },
@@ -115,8 +110,7 @@ const importParticipantSchema = z.object({
   name: z.string().min(1, { message: "El nombre es requerido." }),
   surname: z.string().min(1, { message: "El apellido es requerido." }),
   dni: z.string().min(1, { message: "El DNI/ID es requerido." }),
-  birthDate: z.string().optional(),
-  age: z.coerce.number().int().min(0).optional(),
+  birthDate: z.string().min(1, "La fecha de nacimiento es requerida"),
   gender: z.enum(['Male', 'Female', 'Other'], {
     errorMap: () => ({ message: 'El género es requerido (Male, Female, Other).' }),
   }),
@@ -126,9 +120,6 @@ const importParticipantSchema = z.object({
   city: z.string().optional(),
   province: z.string().optional(),
   country: z.string().optional(),
-}).refine(data => (data.birthDate && data.birthDate.trim() !== '') || (data.age !== undefined && !isNaN(data.age) && data.age >= 0), {
-  message: "Debe proporcionar la fecha de nacimiento o la edad.",
-  path: ["birthDate"],
 });
 
 
@@ -153,7 +144,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
 
   const form = useForm<ParticipantFormValues>({
     resolver: zodResolver(participantSchema),
-    defaultValues: { name: "", surname: "", dni: "", birthDate: "", gender: "Male", distance: "5k", bibNumber: "" },
+    defaultValues: { bibNumber: "", name: "", surname: "", dni: "", birthDate: "", gender: "Male", distance: "5k" },
   });
 
   const handleOpenDialog = (participant?: Participant) => {
@@ -162,11 +153,10 @@ export function ParticipantsTable({ participants, categories }: { participants: 
       form.reset({
         ...participant,
         birthDate: participant.birthDate ? new Date(participant.birthDate).toISOString().split('T')[0] : '',
-        age: participant.age ?? undefined,
       });
     } else {
       setEditingParticipant(null);
-      form.reset({ name: "", surname: "", dni: "", birthDate: "", gender: "Male", distance: "5k", bibNumber: "" });
+      form.reset({ bibNumber: "", name: "", surname: "", dni: "", birthDate: "", gender: "Male", distance: "5k" });
     }
     setOpen(true);
   };
@@ -181,7 +171,6 @@ export function ParticipantsTable({ participants, categories }: { participants: 
         gender: values.gender,
         distance: values.distance,
         birthDate: values.birthDate,
-        age: values.age,
         city: values.city,
         province: values.province,
         country: values.country,
@@ -293,8 +282,6 @@ export function ParticipantsTable({ participants, categories }: { participants: 
               else if (distanceRaw.includes('21')) value = '21k';
               else if (distanceRaw.includes('10')) value = '10k';
               else value = '5k';
-            } else if (field.key === 'age') {
-              value = parseInt(value.replace(/\D/g, ''), 10);
             } else if (field.key === 'dni') {
               value = value.replace(/[.-]/g, '').trim();
             }
@@ -404,7 +391,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
   const isAdmin = role === 'admin';
 
   const renderParticipantRow = (p: Participant) => {
-    const age = p.age ?? calculateAge(p.birthDate, raceDate, ageCalculationMethod);
+    const age = calculateAge(p.birthDate, raceDate, ageCalculationMethod);
     const timer = timers[p.id];
     const isRunning = timer?.isRunning ?? false;
     
@@ -462,7 +449,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
   };
   
   const renderParticipantCard = (p: Participant) => {
-    const age = p.age ?? calculateAge(p.birthDate, raceDate, ageCalculationMethod);
+    const age = calculateAge(p.birthDate, raceDate, ageCalculationMethod);
     const timer = timers[p.id];
     const isRunning = timer?.isRunning ?? false;
     return (
@@ -592,21 +579,13 @@ export function ParticipantsTable({ participants, categories }: { participants: 
                 <FormItem><FormLabel>DNI / ID</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
               )} />
               
-              <div className="grid grid-cols-2 gap-4">
-                <FormField control={form.control} name="birthDate" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Fecha de Nacimiento</FormLabel>
-                    <FormControl><Input type="date" {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-                <FormField control={form.control} name="age" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>o Edad</FormLabel>
-                    <FormControl><Input type="number" {...field} /></FormControl>
-                  </FormItem>
-                )} />
-              </div>
+              <FormField control={form.control} name="birthDate" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Fecha de Nacimiento</FormLabel>
+                  <FormControl><Input type="date" {...field} /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
 
               <div className="grid grid-cols-2 gap-4">
                 <FormField control={form.control} name="gender" render={({ field }) => (

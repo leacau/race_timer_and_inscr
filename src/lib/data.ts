@@ -14,7 +14,7 @@ import {
     writeBatch,
     getDoc
 } from "firebase/firestore";
-import type { Participant, Category, CategoryInput, ParticipantFirestoreData } from "./types";
+import type { Participant, Category, CategoryInput, ParticipantFirestoreData, ParticipantInput } from "./types";
 
 export async function getParticipants(): Promise<Participant[]> {
     const participantsCol = collection(db, "participants");
@@ -32,8 +32,8 @@ export async function getCategories(): Promise<Category[]> {
     return categoryList;
 }
 
-export async function addParticipant(participant: ParticipantFirestoreData): Promise<string> {
-    const docRef = await addDoc(collection(db, "participants"), participant);
+export async function addParticipant(participantData: ParticipantFirestoreData): Promise<string> {
+    const docRef = await addDoc(collection(db, "participants"), participantData);
     return docRef.id;
 }
 
@@ -51,20 +51,14 @@ export async function updateParticipantTime(id: string, startTime: number, finis
     await updateDoc(participantRef, { startTime, finishTime });
 }
 
-export async function addCategory(category: CategoryInput): Promise<Category> {
+export async function addCategory(category: CategoryInput): Promise<string> {
     const docRef = await addDoc(collection(db, "categories"), category);
-    return { ...category, id: docRef.id };
+    return docRef.id;
 }
 
-export async function updateCategory(updatedCategory: Category): Promise<Category | null> {
-    const categoryRef = doc(db, "categories", updatedCategory.id);
-    const { id, ...dataToUpdate } = updatedCategory;
-    await updateDoc(categoryRef, dataToUpdate);
-    const updatedDoc = await getDoc(categoryRef);
-    if(updatedDoc.exists()) {
-        return { id: updatedDoc.id, ...updatedDoc.data() } as Category;
-    }
-    return null;
+export async function updateCategory(id: string, categoryData: CategoryInput): Promise<void> {
+    const categoryRef = doc(db, "categories", id);
+    await updateDoc(categoryRef, categoryData);
 }
 
 export async function deleteCategory(id: string): Promise<void> {
