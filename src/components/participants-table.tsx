@@ -1,5 +1,4 @@
 
-
 "use client";
 
 import React, { useState, useEffect, useContext, useMemo, useRef } from "react";
@@ -174,14 +173,12 @@ export function ParticipantsTable({ participants, categories }: { participants: 
 
   const onSubmit = async (values: ParticipantFormValues) => {
     try {
-      const { id, ...participantData } = values;
-      
       if (editingParticipant) {
-          const payload = { ...editingParticipant, ...participantData, raceDate, ageCalculationMethod};
+          const payload = { ...editingParticipant, ...values, raceDate, ageCalculationMethod};
           await updateParticipant(payload);
           toast({ title: "Participante Actualizado", description: "El participante ha sido actualizado correctamente." });
       } else {
-          const payload = { ...participantData, raceDate, ageCalculationMethod };
+          const payload = { ...values, raceDate, ageCalculationMethod };
           await addParticipant(payload);
           toast({ title: "Participante Añadido", description: "El nuevo participante ha sido añadido correctamente." });
       }

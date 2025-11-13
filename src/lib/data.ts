@@ -33,48 +33,55 @@ export async function getCategories(): Promise<Category[]> {
     return categoryList;
 }
 
-export async function addParticipant(participant: ParticipantInput & { categoryId?: string, chipNumber: string }): Promise<Participant> {
-    const { bibNumber, name, surname, dni, gender, distance, chipNumber, birthDate, age, categoryId, city, province, country } = participant;
+export async function addParticipant(participant: ParticipantInput & { categoryId?: string, chipNumber: string }): Promise<string> {
     
     const dataToSave: { [key: string]: any } = {
-        bibNumber,
-        name,
-        surname,
-        dni,
-        gender,
-        distance,
-        chipNumber,
+        bibNumber: participant.bibNumber,
+        name: participant.name,
+        surname: participant.surname,
+        dni: participant.dni,
+        gender: participant.gender,
+        distance: participant.distance,
+        chipNumber: participant.chipNumber,
         startTime: null,
         finishTime: null,
     };
 
-    if (birthDate) dataToSave.birthDate = birthDate;
-    if (age !== undefined) dataToSave.age = age;
-    if (categoryId) dataToSave.categoryId = categoryId;
-    if (city) dataToSave.city = city;
-    if (province) dataToSave.province = province;
-    if (country) dataToSave.country = country;
+    if (participant.birthDate) dataToSave.birthDate = participant.birthDate;
+    if (participant.age !== undefined) dataToSave.age = participant.age;
+    if (participant.categoryId) dataToSave.categoryId = participant.categoryId;
+    if (participant.city) dataToSave.city = participant.city;
+    if (participant.province) dataToSave.province = participant.province;
+    if (participant.country) dataToSave.country = participant.country;
     
     const docRef = await addDoc(collection(db, "participants"), dataToSave);
-    return { id: docRef.id, ...dataToSave } as Participant;
+    return docRef.id;
 }
 
-export async function updateParticipant(updatedParticipant: Participant): Promise<Participant | null> {
-    const participantRef = doc(db, "participants", updatedParticipant.id);
+export async function updateParticipant(updatedParticipant: Participant): Promise<void> {
+    const { id, ...data } = updatedParticipant;
+    const participantRef = doc(db, "participants", id);
     
-    // Create a copy of the object to avoid modifying the original
-    const dataToSave: { [key: string]: any } = { ...updatedParticipant };
-    
-    // Remove the 'id' field as it should not be saved within the Firestore document itself
-    delete dataToSave.id;
+    const dataToSave: { [key: string]: any } = {
+        bibNumber: data.bibNumber,
+        name: data.name,
+        surname: data.surname,
+        dni: data.dni,
+        gender: data.gender,
+        distance: data.distance,
+        chipNumber: data.chipNumber,
+    };
+
+    if (data.birthDate) dataToSave.birthDate = data.birthDate;
+    if (data.age !== undefined) dataToSave.age = data.age;
+    if (data.categoryId) dataToSave.categoryId = data.categoryId;
+    if (data.city) dataToSave.city = data.city;
+    if (data.province) dataToSave.province = data.province;
+    if (data.country) dataToSave.country = data.country;
+    if (data.startTime) dataToSave.startTime = data.startTime;
+    if (data.finishTime) dataToSave.finishTime = data.finishTime;
 
     await updateDoc(participantRef, dataToSave);
-
-    const updatedDoc = await getDoc(participantRef);
-    if(updatedDoc.exists()) {
-        return { id: updatedDoc.id, ...updatedDoc.data() } as Participant;
-    }
-    return null;
 }
 
 export async function deleteParticipant(id: string): Promise<void> {

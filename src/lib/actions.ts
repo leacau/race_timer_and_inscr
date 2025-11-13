@@ -19,14 +19,21 @@ import type { AgeCalculationMethod, Category, CategoryInput, Participant, Partic
 import { calculateAge, generateChipNumber } from "./utils";
 
 const assignCategory = (
-  participant: Omit<Participant, "id" | "chipNumber" | "startTime" | "finishTime">,
+  participant: {
+    distance: Participant['distance'];
+    gender: Participant['gender'];
+    birthDate?: string;
+    age?: number;
+  },
   categories: Category[],
   raceDate: Date,
   ageCalculationMethod: AgeCalculationMethod
 ): string | undefined => {
-  let age: number | null = participant.age ?? null;
-  if (age === null && participant.birthDate) {
-    age = calculateAge(participant.birthDate, raceDate, ageCalculationMethod);
+  let age: number | null = null;
+  if (participant.age !== undefined && participant.age !== null) {
+      age = participant.age;
+  } else if (participant.birthDate) {
+      age = calculateAge(participant.birthDate, raceDate, ageCalculationMethod);
   }
 
   if (age === null) return undefined;
