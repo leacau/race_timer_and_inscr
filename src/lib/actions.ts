@@ -139,7 +139,7 @@ export async function deleteCategory(id: string) {
 
 export async function bulkDeleteCategories(ids: string[]) {
   await db.bulkDeleteCategories(ids);
-  revalidatePath("/categories");
+revalidatePath("/categories");
   revalidatePath("/");
 }
 

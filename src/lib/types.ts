@@ -1,4 +1,5 @@
 
+
 export type AgeCalculationMethod = 'raceDay' | 'endOfYear';
 
 // Tipo de Participante como se lee de Firestore
