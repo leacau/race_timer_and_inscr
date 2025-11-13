@@ -15,29 +15,30 @@ import {
   updateParticipant as dbUpdateParticipant,
   updateParticipantTime as dbUpdateParticipantTime,
 } from "./data";
-import type { AgeCalculationMethod, Category, CategoryInput, Participant, ParticipantInput } from "./types";
+import type { AgeCalculationMethod, Category, CategoryInput, ParticipantInput, ParticipantFirestoreData } from "./types";
 import { calculateAge, generateChipNumber } from "./utils";
+
 
 const assignCategory = (
   participant: {
-    distance: Participant['distance'];
-    gender: Participant['gender'];
-    birthDate?: string;
-    age?: number;
+    distance: '5k' | '10k' | '21k' | '42k';
+    gender: 'Male' | 'Female' | 'Other';
+    birthDate?: string | null;
+    age?: number | null;
   },
   categories: Category[],
   raceDate: Date,
   ageCalculationMethod: AgeCalculationMethod
-): string | undefined => {
+): string | null => {
   let age: number | null = null;
   
-  if (participant.age !== undefined && participant.age !== null) {
+  if (participant.age) {
       age = participant.age;
   } else if (participant.birthDate) {
       age = calculateAge(participant.birthDate, raceDate, ageCalculationMethod);
   }
 
-  if (age === null) return undefined;
+  if (age === null) return null;
 
   for (const category of categories) {
     if (
@@ -49,45 +50,73 @@ const assignCategory = (
       return category.id;
     }
   }
-  return undefined;
+  return null;
 };
 
-// Participant Actions
-export async function addParticipant(participantData: ParticipantInput & { raceDate: Date; ageCalculationMethod: AgeCalculationMethod; }) {
-  const { raceDate, ageCalculationMethod, ...pData } = participantData;
-  const categories = await dbGetCategories();
+// Converts client-side ParticipantInput to server-side ParticipantFirestoreData
+// ensuring no 'undefined' values are sent to Firestore.
+const prepareParticipantData = (
+  pData: ParticipantInput,
+  categories: Category[],
+  raceDate: Date,
+  ageCalculationMethod: AgeCalculationMethod
+): ParticipantFirestoreData => {
   const categoryId = assignCategory(pData, categories, raceDate, ageCalculationMethod);
   const chipNumber = generateChipNumber(pData.bibNumber);
 
-  const participantToSave: Omit<Participant, 'id'> = {
-    ...pData,
-    categoryId,
-    chipNumber,
+  return {
+    bibNumber: pData.bibNumber,
+    name: pData.name,
+    surname: pData.surname,
+    dni: pData.dni,
+    gender: pData.gender,
+    distance: pData.distance,
+    birthDate: pData.birthDate || null,
+    age: pData.age || null,
+    city: pData.city || null,
+    province: pData.province || null,
+    country: pData.country || null,
+    categoryId: categoryId,
+    chipNumber: chipNumber,
     startTime: null,
     finishTime: null,
   };
+};
+
+// Participant Actions
+export async function addParticipant(
+  participantData: ParticipantInput,
+  raceDate: Date,
+  ageCalculationMethod: AgeCalculationMethod
+) {
+  const categories = await dbGetCategories();
+  const participantToSave = prepareParticipantData(participantData, categories, raceDate, ageCalculationMethod);
   
   await dbAddParticipant(participantToSave);
   revalidatePath("/");
 }
 
 export async function updateParticipant(
-  participant: Participant & {
-    raceDate: Date;
-    ageCalculationMethod: AgeCalculationMethod;
-  }
+  id: string,
+  participantData: ParticipantInput,
+  raceDate: Date,
+  ageCalculationMethod: AgeCalculationMethod
 ) {
-  const { raceDate, ageCalculationMethod, ...pData } = participant;
   const categories = await dbGetCategories();
-  const categoryId = assignCategory(
-    pData,
-    categories,
-    raceDate,
-    ageCalculationMethod
-  );
-  
-  const participantToUpdate: Participant = { ...pData, categoryId };
-  await dbUpdateParticipant(participantToUpdate);
+  // We only update a subset of fields, but we need to re-calculate the category
+  const categoryId = assignCategory(participantData, categories, raceDate, ageCalculationMethod);
+
+  const dataToUpdate: Partial<ParticipantFirestoreData> = {
+    ...participantData,
+    age: participantData.age || null,
+    birthDate: participantData.birthDate || null,
+    city: participantData.city || null,
+    province: participantData.province || null,
+    country: participantData.country || null,
+    categoryId: categoryId,
+  };
+
+  await dbUpdateParticipant(id, dataToUpdate);
   revalidatePath("/");
 }
 
@@ -228,20 +257,9 @@ export async function importParticipants(
 ) {
   const categories = await dbGetCategories();
 
-  const participantsToCreate = participants.map((p) => {
-    const categoryId = assignCategory(
-      p,
-      categories,
-      raceDate,
-      ageCalculationMethod
-    );
-    const chipNumber = generateChipNumber(p.bibNumber);
-    return {
-      ...p,
-      categoryId,
-      chipNumber,
-    };
-  });
+  const participantsToCreate = participants.map((p) => 
+    prepareParticipantData(p, categories, raceDate, ageCalculationMethod)
+  );
 
   if (participantsToCreate.length === 0) {
     return { count: 0 };

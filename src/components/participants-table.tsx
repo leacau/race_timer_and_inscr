@@ -162,7 +162,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
       form.reset({
         ...participant,
         birthDate: participant.birthDate ? new Date(participant.birthDate).toISOString().split('T')[0] : '',
-        age: participant.age
+        age: participant.age ?? undefined,
       });
     } else {
       setEditingParticipant(null);
@@ -173,18 +173,25 @@ export function ParticipantsTable({ participants, categories }: { participants: 
 
   const onSubmit = async (values: ParticipantFormValues) => {
     try {
+      const participantInput: ParticipantInput = {
+        bibNumber: values.bibNumber,
+        name: values.name,
+        surname: values.surname,
+        dni: values.dni,
+        gender: values.gender,
+        distance: values.distance,
+        birthDate: values.birthDate,
+        age: values.age,
+        city: values.city,
+        province: values.province,
+        country: values.country,
+      };
+
       if (editingParticipant) {
-          const payload = {
-             ...editingParticipant, 
-             ...values, 
-             raceDate, 
-             ageCalculationMethod
-          };
-          await updateParticipant(payload);
+          await updateParticipant(editingParticipant.id, participantInput, raceDate, ageCalculationMethod);
           toast({ title: "Participante Actualizado", description: "El participante ha sido actualizado correctamente." });
       } else {
-          const payload = { ...values, raceDate, ageCalculationMethod };
-          await addParticipant(payload);
+          await addParticipant(participantInput, raceDate, ageCalculationMethod);
           toast({ title: "Participante Añadido", description: "El nuevo participante ha sido añadido correctamente." });
       }
       setOpen(false);

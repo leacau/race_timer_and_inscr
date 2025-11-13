@@ -14,7 +14,7 @@ import {
     writeBatch,
     getDoc
 } from "firebase/firestore";
-import type { Participant, Category, ParticipantInput, CategoryInput } from "./types";
+import type { Participant, Category, CategoryInput, ParticipantFirestoreData } from "./types";
 
 export async function getParticipants(): Promise<Participant[]> {
     const participantsCol = collection(db, "participants");
@@ -32,13 +32,12 @@ export async function getCategories(): Promise<Category[]> {
     return categoryList;
 }
 
-export async function addParticipant(participant: Omit<Participant, 'id'>): Promise<string> {
+export async function addParticipant(participant: ParticipantFirestoreData): Promise<string> {
     const docRef = await addDoc(collection(db, "participants"), participant);
     return docRef.id;
 }
 
-export async function updateParticipant(participant: Participant): Promise<void> {
-    const { id, ...data } = participant;
+export async function updateParticipant(id: string, data: Partial<ParticipantFirestoreData>): Promise<void> {
     const participantRef = doc(db, "participants", id);
     await updateDoc(participantRef, data);
 }
@@ -82,9 +81,8 @@ export async function bulkDeleteCategories(ids: string[]): Promise<void> {
     await batch.commit();
 }
 
-type ParticipantToCreate = ParticipantInput & { categoryId?: string; chipNumber: string };
 
-export async function importParticipants(participants: ParticipantToCreate[]): Promise<void> {
+export async function importParticipants(participants: ParticipantFirestoreData[]): Promise<void> {
     const participantsCol = collection(db, "participants");
     const batchSize = 499;
 
@@ -94,12 +92,7 @@ export async function importParticipants(participants: ParticipantToCreate[]): P
 
         for (const participant of chunk) {
             const docRef = doc(participantsCol);
-            const dataToSave: Omit<Participant, 'id'> = {
-                ...participant,
-                startTime: null,
-                finishTime: null,
-            };
-            batch.set(docRef, dataToSave);
+            batch.set(docRef, participant);
         }
         await batch.commit();
     }
