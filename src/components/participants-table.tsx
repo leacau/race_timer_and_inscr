@@ -175,16 +175,13 @@ export function ParticipantsTable({ participants, categories }: { participants: 
   const onSubmit = async (values: ParticipantFormValues) => {
     try {
       const { id, ...participantData } = values;
-      const payload = {
-          ...participantData,
-          raceDate: raceDate,
-          ageCalculationMethod: ageCalculationMethod
-      };
-
+      
       if (editingParticipant) {
-          await updateParticipant({ ...editingParticipant, ...payload });
+          const payload = { ...editingParticipant, ...participantData, raceDate, ageCalculationMethod};
+          await updateParticipant(payload);
           toast({ title: "Participante Actualizado", description: "El participante ha sido actualizado correctamente." });
       } else {
+          const payload = { ...participantData, raceDate, ageCalculationMethod };
           await addParticipant(payload);
           toast({ title: "Participante Añadido", description: "El nuevo participante ha sido añadido correctamente." });
       }

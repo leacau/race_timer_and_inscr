@@ -118,8 +118,8 @@ export async function deleteCategory(id: string) {
 
 export async function bulkDeleteCategories(ids: string[]) {
   await dbBulkDeleteCategories(ids);
-  revalidatePath("/categories");
-  revalidatePath("/");
+revalidatePath("/categories");
+revalidatePath("/");
 }
 
 const bulkCategorySchema = z.object({
