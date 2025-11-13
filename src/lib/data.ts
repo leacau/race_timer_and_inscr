@@ -76,8 +76,8 @@ export async function updateParticipant(updatedParticipant: Participant): Promis
       ...(dataToUpdate.city && { city: dataToUpdate.city }),
       ...(dataToUpdate.province && { province: dataToUpdate.province }),
       ...(dataToUpdate.country && { country: dataToUpdate.country }),
-      ...(dataToUpdate.startTime && { startTime: dataToUpdate.startTime }),
-      ...(dataToUpdate.finishTime && { finishTime: dataToUpdate.finishTime }),
+      startTime: dataToUpdate.startTime ?? null,
+      finishTime: dataToUpdate.finishTime ?? null,
     };
 
     await updateDoc(participantRef, dataToSave);
