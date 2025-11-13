@@ -12,7 +12,6 @@ import {
     query,
     orderBy,
     writeBatch,
-    where,
     getDoc
 } from "firebase/firestore";
 import type { Participant, Category, ParticipantInput, CategoryInput } from "./types";
@@ -36,7 +35,8 @@ export async function getCategories(): Promise<Category[]> {
 
 export async function addParticipant(participant: ParticipantInput & { categoryId?: string, chipNumber: string }): Promise<Participant> {
     const { bibNumber, name, surname, dni, gender, distance, chipNumber, birthDate, age, categoryId, city, province, country } = participant;
-    const dataToSave = {
+    
+    const dataToSave: { [key: string]: any } = {
         bibNumber,
         name,
         surname,
@@ -44,25 +44,26 @@ export async function addParticipant(participant: ParticipantInput & { categoryI
         gender,
         distance,
         chipNumber,
-        ...(birthDate && { birthDate }),
-        ...(age !== undefined && { age }),
-        ...(categoryId && { categoryId }),
-        ...(city && { city }),
-        ...(province && { province }),
-        ...(country && { country }),
         startTime: null,
         finishTime: null,
     };
+
+    if (birthDate) dataToSave.birthDate = birthDate;
+    if (age !== undefined) dataToSave.age = age;
+    if (categoryId) dataToSave.categoryId = categoryId;
+    if (city) dataToSave.city = city;
+    if (province) dataToSave.province = province;
+    if (country) dataToSave.country = country;
     
     const docRef = await addDoc(collection(db, "participants"), dataToSave);
-    return { ...dataToSave, id: docRef.id } as Participant;
+    return { id: docRef.id, ...dataToSave } as Participant;
 }
 
 export async function updateParticipant(updatedParticipant: Participant): Promise<Participant | null> {
     const participantRef = doc(db, "participants", updatedParticipant.id);
     const { id, ...dataToUpdate } = updatedParticipant;
 
-    const dataToSave = {
+    const dataToSave: { [key: string]: any } = {
       bibNumber: dataToUpdate.bibNumber,
       name: dataToUpdate.name,
       surname: dataToUpdate.surname,
@@ -70,15 +71,16 @@ export async function updateParticipant(updatedParticipant: Participant): Promis
       gender: dataToUpdate.gender,
       distance: dataToUpdate.distance,
       chipNumber: dataToUpdate.chipNumber,
-      ...(dataToUpdate.birthDate && { birthDate: dataToUpdate.birthDate }),
-      ...(dataToUpdate.age !== undefined && { age: dataToUpdate.age }),
-      ...(dataToUpdate.categoryId && { categoryId: dataToUpdate.categoryId }),
-      ...(dataToUpdate.city && { city: dataToUpdate.city }),
-      ...(dataToUpdate.province && { province: dataToUpdate.province }),
-      ...(dataToUpdate.country && { country: dataToUpdate.country }),
       startTime: dataToUpdate.startTime ?? null,
       finishTime: dataToUpdate.finishTime ?? null,
     };
+
+    if (dataToUpdate.birthDate) dataToSave.birthDate = dataToUpdate.birthDate;
+    if (dataToUpdate.age !== undefined) dataToSave.age = dataToUpdate.age;
+    if (dataToUpdate.categoryId) dataToSave.categoryId = dataToUpdate.categoryId;
+    if (dataToUpdate.city) dataToSave.city = dataToUpdate.city;
+    if (dataToUpdate.province) dataToSave.province = dataToUpdate.province;
+    if (dataToUpdate.country) dataToSave.country = dataToUpdate.country;
 
     await updateDoc(participantRef, dataToSave);
     const updatedDoc = await getDoc(participantRef);
@@ -140,7 +142,7 @@ export async function importParticipants(participants: ParticipantToCreate[]): P
         for (const participant of chunk) {
             const docRef = doc(participantsCol);
             const { bibNumber, name, surname, dni, gender, distance, chipNumber, birthDate, age, categoryId, city, province, country } = participant;
-            const dataToSave = {
+            const dataToSave: { [key: string]: any } = {
                 bibNumber,
                 name,
                 surname,
@@ -148,15 +150,17 @@ export async function importParticipants(participants: ParticipantToCreate[]): P
                 gender,
                 distance,
                 chipNumber,
-                ...(birthDate && { birthDate }),
-                ...(age !== undefined && { age }),
-                ...(categoryId && { categoryId }),
-                ...(city && { city }),
-                ...(province && { province }),
-                ...(country && { country }),
                 startTime: null,
                 finishTime: null,
             };
+
+            if (birthDate) dataToSave.birthDate = birthDate;
+            if (age !== undefined) dataToSave.age = age;
+            if (categoryId) dataToSave.categoryId = categoryId;
+            if (city) dataToSave.city = city;
+            if (province) dataToSave.province = province;
+            if (country) dataToSave.country = country;
+            
             batch.set(docRef, dataToSave);
         }
         await batch.commit();
