@@ -144,7 +144,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
 
   const form = useForm<ParticipantFormValues>({
     resolver: zodResolver(participantSchema),
-    defaultValues: { bibNumber: "", name: "", surname: "", dni: "", birthDate: "", gender: "Male", distance: "5k" },
+    defaultValues: { bibNumber: "", name: "", surname: "", dni: "", birthDate: "", gender: "Male", distance: "5k", city: "", province: "", country: "" },
   });
 
   const handleOpenDialog = (participant?: Participant) => {
@@ -156,7 +156,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
       });
     } else {
       setEditingParticipant(null);
-      form.reset({ bibNumber: "", name: "", surname: "", dni: "", birthDate: "", gender: "Male", distance: "5k" });
+      form.reset({ bibNumber: "", name: "", surname: "", dni: "", birthDate: "", gender: "Male", distance: "5k", city: "", province: "", country: "" });
     }
     setOpen(true);
   };
@@ -615,6 +615,16 @@ export function ParticipantsTable({ participants, categories }: { participants: 
                   </FormItem>
                 )} />
               </div>
+               <FormField control={form.control} name="city" render={({ field }) => (
+                  <FormItem><FormLabel>Ciudad</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+                )} />
+                 <FormField control={form.control} name="province" render={({ field }) => (
+                  <FormItem><FormLabel>Provincia</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+                )} />
+                 <FormField control={form.control} name="country" render={({ field }) => (
+                  <FormItem><FormLabel>País</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+                )} />
+
               <DialogFooter>
                 <DialogClose asChild><Button type="button" variant="secondary">Cancelar</Button></DialogClose>
                 <Button type="submit">Guardar</Button>

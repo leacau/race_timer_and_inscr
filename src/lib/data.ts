@@ -14,7 +14,7 @@ import {
     writeBatch,
     getDoc
 } from "firebase/firestore";
-import type { Participant, Category, CategoryInput, ParticipantFirestoreData, ParticipantInput } from "./types";
+import type { Participant, Category, CategoryInput, ParticipantFirestoreData } from "./types";
 
 export async function getParticipants(): Promise<Participant[]> {
     const participantsCol = collection(db, "participants");
@@ -74,7 +74,6 @@ export async function bulkDeleteCategories(ids: string[]): Promise<void> {
     });
     await batch.commit();
 }
-
 
 export async function importParticipants(participants: ParticipantFirestoreData[]): Promise<void> {
     const participantsCol = collection(db, "participants");

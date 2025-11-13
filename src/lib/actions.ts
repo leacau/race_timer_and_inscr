@@ -3,48 +3,10 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import {
-  addCategory as dbAddCategory,
-  addParticipant as dbAddParticipant,
-  bulkDeleteCategories as dbBulkDeleteCategories,
-  deleteCategory as dbDeleteCategory,
-  deleteParticipant as dbDeleteParticipant,
-  getCategories as dbGetCategories,
-  importParticipants as dbImportParticipants,
-  updateCategory as dbUpdateCategory,
-  updateParticipant as dbUpdateParticipant,
-  updateParticipantTime as dbUpdateParticipantTime,
-} from "./data";
-import type { AgeCalculationMethod, Category, CategoryInput, ParticipantInput, ParticipantFirestoreData } from "./types";
-import { calculateAge, generateChipNumber } from "./utils";
-
-
-const assignCategory = (
-  participant: {
-    distance: '5k' | '10k' | '21k' | '42k';
-    gender: 'Male' | 'Female' | 'Other';
-    birthDate: string;
-  },
-  categories: Category[],
-  raceDate: Date,
-  ageCalculationMethod: AgeCalculationMethod
-): string | null => {
-  const age = calculateAge(participant.birthDate, raceDate, ageCalculationMethod);
-
-  if (age === null) return null;
-
-  for (const category of categories) {
-    if (
-      participant.distance === category.distance &&
-      (category.gender === "Any" || category.gender === participant.gender) &&
-      age >= category.minAge &&
-      age <= category.maxAge
-    ) {
-      return category.id;
-    }
-  }
-  return null;
-};
+import * as db from "./data";
+import { assignCategory } from "./logic";
+import { generateChipNumber } from "./utils";
+import type { AgeCalculationMethod, Category, CategoryInput, ParticipantFirestoreData, ParticipantInput } from "./types";
 
 // Participant Actions
 export async function addParticipant(
@@ -52,7 +14,7 @@ export async function addParticipant(
   raceDate: Date,
   ageCalculationMethod: AgeCalculationMethod
 ) {
-  const categories = await dbGetCategories();
+  const categories = await db.getCategories();
   const categoryId = assignCategory(participantData, categories, raceDate, ageCalculationMethod);
   const chipNumber = generateChipNumber(participantData.bibNumber);
 
@@ -67,7 +29,7 @@ export async function addParticipant(
     finishTime: null,
   };
   
-  await dbAddParticipant(participantToSave);
+  await db.addParticipant(participantToSave);
   revalidatePath("/");
 }
 
@@ -77,24 +39,20 @@ export async function updateParticipant(
   raceDate: Date,
   ageCalculationMethod: AgeCalculationMethod
 ) {
-  const categories = await dbGetCategories();
+  const categories = await db.getCategories();
   const categoryId = assignCategory(participantData, categories, raceDate, ageCalculationMethod);
   
-  // Build a partial update object for Firestore
   const dataToUpdate: Partial<ParticipantFirestoreData> = {
     ...participantData,
-    city: participantData.city || null,
-    province: participantData.province || null,
-    country: participantData.country || null,
     categoryId,
   };
 
-  await dbUpdateParticipant(id, dataToUpdate);
+  await db.updateParticipant(id, dataToUpdate);
   revalidatePath("/");
 }
 
 export async function deleteParticipant(id: string) {
-  await dbDeleteParticipant(id);
+  await db.deleteParticipant(id);
   revalidatePath("/");
 }
 
@@ -103,9 +61,50 @@ export async function updateParticipantTime(
   startTime: number,
   finishTime: number
 ) {
-  await dbUpdateParticipantTime(id, startTime, finishTime);
+  await db.updateParticipantTime(id, startTime, finishTime);
   revalidatePath("/");
 }
+
+export async function importParticipants(
+  participants: z.infer<typeof serverImportParticipantSchema>[],
+  raceDate: Date,
+  ageCalculationMethod: AgeCalculationMethod
+) {
+  const categories = await db.getCategories();
+
+  const participantsToCreate = participants.map((p) => {
+    const categoryId = assignCategory(p, categories, raceDate, ageCalculationMethod);
+    const chipNumber = generateChipNumber(p.bibNumber);
+
+    const data: ParticipantFirestoreData = {
+        bibNumber: p.bibNumber,
+        name: p.name,
+        surname: p.surname,
+        dni: p.dni,
+        gender: p.gender,
+        distance: p.distance,
+        birthDate: p.birthDate,
+        categoryId: categoryId,
+        chipNumber: chipNumber,
+        startTime: null,
+        finishTime: null,
+        city: p.city || null,
+        province: p.province || null,
+        country: p.country || null,
+    };
+    return data;
+  });
+
+  if (participantsToCreate.length === 0) {
+    return { count: 0 };
+  }
+
+  await db.importParticipants(participantsToCreate);
+
+  revalidatePath("/");
+  return { count: participantsToCreate.length };
+}
+
 
 // Category Actions
 const categorySchema = z.object({
@@ -120,28 +119,28 @@ export async function addCategory(
   categoryData: CategoryInput
 ) {
   const validatedData = categorySchema.parse(categoryData);
-  await dbAddCategory(validatedData);
+  await db.addCategory(validatedData);
   revalidatePath("/categories");
-  revalidatePath("/"); // Also revalidate participants page in case categories change
+  revalidatePath("/");
 }
 
 export async function updateCategory(id: string, categoryData: CategoryInput) {
   const validatedData = categorySchema.parse(categoryData);
-  await dbUpdateCategory(id, validatedData);
+  await db.updateCategory(id, validatedData);
   revalidatePath("/categories");
   revalidatePath("/");
 }
 
 export async function deleteCategory(id: string) {
-  await dbDeleteCategory(id);
+  await db.deleteCategory(id);
   revalidatePath("/categories");
   revalidatePath("/");
 }
 
 export async function bulkDeleteCategories(ids: string[]) {
-  await dbBulkDeleteCategories(ids);
-revalidatePath("/categories");
-revalidatePath("/");
+  await db.bulkDeleteCategories(ids);
+  revalidatePath("/categories");
+  revalidatePath("/");
 }
 
 const bulkCategorySchema = z.object({
@@ -200,7 +199,7 @@ export async function bulkAddCategories(
           distance: distance as Category["distance"],
           gender: gender as Category["gender"],
         };
-        await dbAddCategory(newCategory);
+        await db.addCategory(newCategory);
       }
     }
   }
@@ -221,43 +220,3 @@ const serverImportParticipantSchema = z.object({
   province: z.string().optional(),
   country: z.string().optional(),
 });
-
-export async function importParticipants(
-  participants: z.infer<typeof serverImportParticipantSchema>[],
-  raceDate: Date,
-  ageCalculationMethod: AgeCalculationMethod
-) {
-  const categories = await dbGetCategories();
-
-  const participantsToCreate = participants.map((p) => {
-    const categoryId = assignCategory(p, categories, raceDate, ageCalculationMethod);
-    const chipNumber = generateChipNumber(p.bibNumber);
-
-    const data: ParticipantFirestoreData = {
-        bibNumber: p.bibNumber,
-        name: p.name,
-        surname: p.surname,
-        dni: p.dni,
-        gender: p.gender,
-        distance: p.distance,
-        birthDate: p.birthDate,
-        categoryId: categoryId,
-        chipNumber: chipNumber,
-        startTime: null,
-        finishTime: null,
-        city: p.city || null,
-        province: p.province || null,
-        country: p.country || null,
-    };
-    return data;
-  });
-
-  if (participantsToCreate.length === 0) {
-    return { count: 0 };
-  }
-
-  await dbImportParticipants(participantsToCreate);
-
-  revalidatePath("/");
-  return { count: participantsToCreate.length };
-}

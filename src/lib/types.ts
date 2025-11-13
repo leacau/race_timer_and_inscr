@@ -10,7 +10,7 @@ export type Participant = {
   dni: string;
   gender: 'Male' | 'Female' | 'Other';
   distance: '5k' | '10k' | '21k' | '42k';
-  birthDate: string; // YYYY-MM-DD - Hacemos que sea requerido para simplificar
+  birthDate: string; // YYYY-MM-DD
   categoryId: string | null;
   startTime: number | null;
   finishTime: number | null;
