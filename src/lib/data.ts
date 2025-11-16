@@ -11,8 +11,7 @@ import {
     doc,
     query,
     orderBy,
-    writeBatch,
-    getDoc
+    writeBatch
 } from "firebase/firestore";
 import type { Participant, Category, CategoryInput, ParticipantFirestoreData } from "./types";
 
@@ -49,6 +48,28 @@ export async function deleteParticipant(id: string): Promise<void> {
 export async function updateParticipantTime(id: string, startTime: number, finishTime: number): Promise<void> {
     const participantRef = doc(db, "participants", id);
     await updateDoc(participantRef, { startTime, finishTime });
+}
+
+export async function bulkDeleteParticipants(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    const batch = writeBatch(db);
+    ids.forEach(id => {
+        const docRef = doc(db, "participants", id);
+        batch.delete(docRef);
+    });
+    await batch.commit();
+}
+
+export async function bulkUpdateParticipants(
+    updates: { id: string; data: Partial<ParticipantFirestoreData> }[]
+): Promise<void> {
+    if (updates.length === 0) return;
+    const batch = writeBatch(db);
+    updates.forEach(({ id, data }) => {
+        const docRef = doc(db, "participants", id);
+        batch.update(docRef, data);
+    });
+    await batch.commit();
 }
 
 export async function addCategory(category: CategoryInput): Promise<string> {

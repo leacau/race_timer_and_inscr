@@ -6,7 +6,9 @@ import { z } from "zod";
 import * as db from "./data";
 import { assignCategory } from "./logic";
 import { generateChipNumber } from "./utils";
-import type { AgeCalculationMethod, Category, CategoryInput, ParticipantFirestoreData, ParticipantInput } from "./types";
+import type { AgeCalculationMethod, Category, CategoryInput, Participant, ParticipantFirestoreData, ParticipantInput } from "./types";
+
+export type TimingMode = 'general' | 'distance' | 'category';
 
 // Participant Actions
 export async function addParticipant(
@@ -31,6 +33,7 @@ export async function addParticipant(
   
   await db.addParticipant(participantToSave);
   revalidatePath("/");
+  revalidatePath("/competitors");
 }
 
 export async function updateParticipant(
@@ -49,11 +52,21 @@ export async function updateParticipant(
 
   await db.updateParticipant(id, dataToUpdate);
   revalidatePath("/");
+  revalidatePath("/competitors");
 }
 
 export async function deleteParticipant(id: string) {
   await db.deleteParticipant(id);
   revalidatePath("/");
+  revalidatePath("/competitors");
+}
+
+export async function bulkDeleteParticipants(ids: string[]) {
+  if (ids.length === 0) return { deleted: 0 };
+  await db.bulkDeleteParticipants(ids);
+  revalidatePath("/");
+  revalidatePath("/competitors");
+  return { deleted: ids.length };
 }
 
 export async function updateParticipantTime(
@@ -63,6 +76,35 @@ export async function updateParticipantTime(
 ) {
   await db.updateParticipantTime(id, startTime, finishTime);
   revalidatePath("/");
+  revalidatePath("/competitors");
+}
+
+export async function startTimingGroup(mode: TimingMode, groupId?: string | null) {
+  const participants = await db.getParticipants();
+  let targets: Participant[] = [];
+
+  if (mode === 'general') {
+    targets = participants;
+  } else if (mode === 'distance') {
+    targets = participants.filter((p) => p.distance === groupId);
+  } else {
+    targets = participants.filter((p) => p.categoryId === (groupId ?? null));
+  }
+
+  if (targets.length === 0) {
+    return { updated: 0 };
+  }
+
+  const startTime = Date.now();
+  await db.bulkUpdateParticipants(
+    targets.map((participant) => ({
+      id: participant.id,
+      data: { startTime, finishTime: null },
+    }))
+  );
+
+  revalidatePath("/");
+  return { updated: targets.length, startTime };
 }
 
 export async function importParticipants(
@@ -102,6 +144,7 @@ export async function importParticipants(
   await db.importParticipants(participantsToCreate);
 
   revalidatePath("/");
+  revalidatePath("/competitors");
   return { count: participantsToCreate.length };
 }
 
