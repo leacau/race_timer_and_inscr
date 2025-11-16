@@ -8,6 +8,16 @@ import { assignCategory } from "./logic";
 import { generateChipNumber } from "./utils";
 import type { AgeCalculationMethod, Category, CategoryInput, Participant, ParticipantFirestoreData, ParticipantInput } from "./types";
 
+type SelectionTarget = { type: "selection"; ids: string[] };
+type RangeTarget = { type: "range"; fromBib: string; toBib: string };
+type AllTarget = { type: "all" };
+
+export type CategoryAssignmentTarget = SelectionTarget | RangeTarget | AllTarget;
+
+export type CategoryAssignmentOptions =
+  | { strategy: "auto"; target: CategoryAssignmentTarget; distanceOverride?: Participant["distance"] }
+  | { strategy: "manual"; target: SelectionTarget; categoryId: string | null };
+
 export type TimingMode = 'general' | 'distance' | 'category';
 
 // Participant Actions
@@ -25,6 +35,7 @@ export async function addParticipant(
     city: participantData.city || null,
     province: participantData.province || null,
     country: participantData.country || null,
+    isSpecial: Boolean(participantData.isSpecial),
     categoryId,
     chipNumber,
     startTime: null,
@@ -44,9 +55,10 @@ export async function updateParticipant(
 ) {
   const categories = await db.getCategories();
   const categoryId = assignCategory(participantData, categories, raceDate, ageCalculationMethod);
-  
+
   const dataToUpdate: Partial<ParticipantFirestoreData> = {
     ...participantData,
+    isSpecial: Boolean(participantData.isSpecial),
     categoryId,
   };
 
@@ -133,6 +145,7 @@ export async function importParticipants(
         city: p.city || null,
         province: p.province || null,
         country: p.country || null,
+        isSpecial: Boolean(p.isSpecial),
     };
     return data;
   });
@@ -146,6 +159,91 @@ export async function importParticipants(
   revalidatePath("/");
   revalidatePath("/competitors");
   return { count: participantsToCreate.length };
+}
+
+const toComparableBib = (value: string): string | number => {
+  const numeric = parseInt(value.replace(/[^0-9]/g, ""), 10);
+  if (!Number.isNaN(numeric)) {
+    return numeric;
+  }
+  return value.trim().toLowerCase();
+};
+
+const compareComparable = (a: string | number, b: string | number) => {
+  if (typeof a === "number" && typeof b === "number") {
+    return a - b;
+  }
+  return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
+};
+
+const isBibWithinRange = (bib: string, fromBib: string, toBib: string) => {
+  let min = toComparableBib(fromBib);
+  let max = toComparableBib(toBib);
+  if (compareComparable(min, max) > 0) {
+    [min, max] = [max, min];
+  }
+  const current = toComparableBib(bib);
+  return compareComparable(current, min) >= 0 && compareComparable(current, max) <= 0;
+};
+
+const resolveTargetParticipants = (
+  target: CategoryAssignmentTarget,
+  participants: Participant[]
+): Participant[] => {
+  if (target.type === "all") {
+    return participants;
+  }
+  if (target.type === "selection") {
+    const selected = new Set(target.ids);
+    return participants.filter((p) => selected.has(p.id));
+  }
+  return participants.filter((p) => isBibWithinRange(p.bibNumber, target.fromBib, target.toBib));
+};
+
+export async function assignCategoriesToParticipants(
+  options: CategoryAssignmentOptions,
+  raceDate: Date,
+  ageCalculationMethod: AgeCalculationMethod
+) {
+  const participants = await db.getParticipants();
+  const targetParticipants = resolveTargetParticipants(options.target, participants);
+
+  if (targetParticipants.length === 0) {
+    return { updated: 0 };
+  }
+
+  if (options.strategy === "manual" && options.target.type !== "selection") {
+    throw new Error("La asignación manual solo admite participantes seleccionados.");
+  }
+
+  const updates: { id: string; data: Partial<ParticipantFirestoreData> }[] = [];
+
+  if (options.strategy === "manual") {
+    targetParticipants.forEach((participant) => {
+      updates.push({ id: participant.id, data: { categoryId: options.categoryId } });
+    });
+  } else {
+    const categories = await db.getCategories();
+    targetParticipants.forEach((participant) => {
+      const distance = options.distanceOverride ?? participant.distance;
+      const nextCategory = assignCategory(
+        { ...participant, distance },
+        categories,
+        raceDate,
+        ageCalculationMethod
+      );
+      const data: Partial<ParticipantFirestoreData> = { categoryId: nextCategory };
+      if (options.distanceOverride) {
+        data.distance = distance;
+      }
+      updates.push({ id: participant.id, data });
+    });
+  }
+
+  await db.bulkUpdateParticipants(updates);
+  revalidatePath("/");
+  revalidatePath("/competitors");
+  return { updated: updates.length };
 }
 
 
@@ -262,4 +360,5 @@ const serverImportParticipantSchema = z.object({
   city: z.string().optional(),
   province: z.string().optional(),
   country: z.string().optional(),
+  isSpecial: z.boolean().optional(),
 });

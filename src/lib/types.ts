@@ -19,6 +19,7 @@ export type Participant = {
   city: string | null;
   province: string | null;
   country: string | null;
+  isSpecial: boolean;
 };
 
 // Tipo para el formulario del cliente y la creación
@@ -33,6 +34,7 @@ export type ParticipantInput = {
   city?: string;
   province?: string;
   country?: string;
+  isSpecial?: boolean;
 };
 
 // Tipo para escribir en Firestore, sin id de documento

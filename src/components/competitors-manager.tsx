@@ -46,7 +46,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { MoreVertical, Edit, Trash2, Plus, Upload } from "lucide-react";
+import { MoreVertical, Edit, Trash2, Plus, Upload, Sparkles } from "lucide-react";
 import type { Participant, Category, ParticipantInput } from "@/lib/types";
 import { calculateAge, deriveBirthDateFromAge } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -60,8 +60,11 @@ import {
   deleteParticipant,
   importParticipants,
   bulkDeleteParticipants,
+  assignCategoriesToParticipants,
 } from "@/lib/actions";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 const participantSchema = z.object({
   id: z.string().optional(),
@@ -75,6 +78,7 @@ const participantSchema = z.object({
   city: z.string().optional(),
   province: z.string().optional(),
   country: z.string().optional(),
+  isSpecial: z.boolean().default(false),
 });
 
 type ParticipantFormValues = z.infer<typeof participantSchema>;
@@ -98,7 +102,18 @@ const systemFields = [
   { key: "city", label: "Ciudad", required: false },
   { key: "province", label: "Provincia", required: false },
   { key: "country", label: "País", required: false },
+  { key: "isSpecial", label: "Categoría especial", required: false },
 ] as const;
+
+const booleanTrueValues = new Set(["1", "true", "si", "sí", "s", "y", "yes", "x", "especial", "special"]);
+
+const parseBooleanish = (value: unknown) => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) return false;
+  return booleanTrueValues.has(normalized);
+};
 
 const pairedFields = ["birthDate", "age"] as const;
 
@@ -136,6 +151,7 @@ const importParticipantSchema = z
     city: z.string().optional(),
     province: z.string().optional(),
     country: z.string().optional(),
+    isSpecial: z.boolean().optional(),
   })
   .refine((data) => Boolean(data.birthDate) || typeof data.age === "number", {
     message: "Debe proporcionar fecha de nacimiento o edad.",
@@ -163,12 +179,28 @@ export function CompetitorsManager({
   const [isImportMappingOpen, setIsImportMappingOpen] = useState(false);
   const [selectedParticipants, setSelectedParticipants] = useState<Set<string>>(new Set());
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [isAssignmentDialogOpen, setIsAssignmentDialogOpen] = useState(false);
+  const [assignmentTab, setAssignmentTab] = useState<"auto" | "manual" | "range">("auto");
+  const [autoTarget, setAutoTarget] = useState<"selected" | "all">("selected");
+  const [autoDistanceEnabled, setAutoDistanceEnabled] = useState(false);
+  const [autoDistanceOverride, setAutoDistanceOverride] = useState<Participant["distance"]>("5k");
+  const [manualCategoryId, setManualCategoryId] = useState<string>("");
+  const [rangeValues, setRangeValues] = useState<{ fromBib: string; toBib: string; distance: Participant["distance"]}>({
+    fromBib: "",
+    toBib: "",
+    distance: "5k",
+  });
+  const [isAssigning, setIsAssigning] = useState(false);
 
   const categoryMap = useMemo(() => {
     return categories.reduce((acc, category) => {
       acc[category.id] = category.name;
       return acc;
     }, {} as Record<string, string>);
+  }, [categories]);
+
+  const orderedCategories = useMemo(() => {
+    return [...categories].sort((a, b) => a.name.localeCompare(b.name));
   }, [categories]);
 
   useEffect(() => {
@@ -183,6 +215,17 @@ export function CompetitorsManager({
     });
   }, [participants]);
 
+  useEffect(() => {
+    if (!isAssignmentDialogOpen) {
+      setAssignmentTab("auto");
+      setAutoTarget("selected");
+      setAutoDistanceEnabled(false);
+      setAutoDistanceOverride("5k");
+      setManualCategoryId("");
+      setRangeValues({ fromBib: "", toBib: "", distance: "5k" });
+    }
+  }, [isAssignmentDialogOpen]);
+
   const form = useForm<ParticipantFormValues>({
     resolver: zodResolver(participantSchema),
     defaultValues: {
@@ -196,6 +239,7 @@ export function CompetitorsManager({
       city: "",
       province: "",
       country: "",
+      isSpecial: false,
     },
   });
 
@@ -205,6 +249,7 @@ export function CompetitorsManager({
       form.reset({
         ...participant,
         birthDate: participant.birthDate ? new Date(participant.birthDate).toISOString().split("T")[0] : "",
+        isSpecial: participant.isSpecial,
       });
     } else {
       setEditingParticipant(null);
@@ -219,6 +264,7 @@ export function CompetitorsManager({
         city: "",
         province: "",
         country: "",
+        isSpecial: false,
       });
     }
     setOpen(true);
@@ -237,6 +283,7 @@ export function CompetitorsManager({
         city: values.city,
         province: values.province,
         country: values.country,
+        isSpecial: values.isSpecial,
       };
 
       if (editingParticipant) {
@@ -275,6 +322,85 @@ export function CompetitorsManager({
       toast({ variant: "destructive", title: "Error", description: "No se pudieron eliminar los participantes seleccionados." });
     } finally {
       setIsBulkDeleting(false);
+    }
+  };
+
+  const handleAssignmentSubmit = async () => {
+    try {
+      setIsAssigning(true);
+      if (assignmentTab === "auto") {
+        if (autoTarget === "selected" && selectedCount === 0) {
+          toast({ variant: "destructive", title: "Selecciona participantes", description: "Elige al menos un competidor para recalcular." });
+          return;
+        }
+        const target =
+          autoTarget === "all"
+            ? ({ type: "all" } as const)
+            : ({ type: "selection", ids: Array.from(selectedParticipants) } as const);
+        await assignCategoriesToParticipants(
+          {
+            strategy: "auto",
+            target,
+            distanceOverride: autoDistanceEnabled ? autoDistanceOverride : undefined,
+          },
+          raceDate,
+          ageCalculationMethod
+        );
+        toast({
+          title: "Categorías recalculadas",
+          description:
+            autoTarget === "all"
+              ? "Se recalcularon todas las categorías según edad, sexo y distancia."
+              : "Se actualizó la categoría de los competidores seleccionados.",
+        });
+        if (autoTarget === "selected") {
+          setSelectedParticipants(new Set());
+        }
+      } else if (assignmentTab === "manual") {
+        if (selectedCount === 0) {
+          toast({ variant: "destructive", title: "Selecciona participantes", description: "Elige a quién asignar la categoría." });
+          return;
+        }
+        if (!manualCategoryId) {
+          toast({ variant: "destructive", title: "Categoría requerida", description: "Selecciona una categoría de destino." });
+          return;
+        }
+        await assignCategoriesToParticipants(
+          {
+            strategy: "manual",
+            target: { type: "selection", ids: Array.from(selectedParticipants) },
+            categoryId: manualCategoryId === "__none__" ? null : manualCategoryId,
+          },
+          raceDate,
+          ageCalculationMethod
+        );
+        toast({ title: "Categorías asignadas", description: "Se actualizó la categoría manualmente." });
+        setSelectedParticipants(new Set());
+      } else {
+        if (!rangeValues.fromBib.trim() || !rangeValues.toBib.trim()) {
+          toast({ variant: "destructive", title: "Rango requerido", description: "Indica los dorsales inicial y final." });
+          return;
+        }
+        await assignCategoriesToParticipants(
+          {
+            strategy: "auto",
+            target: { type: "range", fromBib: rangeValues.fromBib.trim(), toBib: rangeValues.toBib.trim() },
+            distanceOverride: rangeValues.distance,
+          },
+          raceDate,
+          ageCalculationMethod
+        );
+        toast({
+          title: "Rango actualizado",
+          description: `Se reasignaron los dorsales ${rangeValues.fromBib} - ${rangeValues.toBib}.`,
+        });
+      }
+      setIsAssignmentDialogOpen(false);
+    } catch (error) {
+      console.error(error);
+      toast({ variant: "destructive", title: "Error", description: "No se pudieron actualizar las categorías." });
+    } finally {
+      setIsAssigning(false);
     }
   };
 
@@ -393,6 +519,11 @@ export function CompetitorsManager({
           continue;
         }
 
+        if (field.key === "isSpecial") {
+          participantData[field.key] = parseBooleanish(value);
+          continue;
+        }
+
         if (field.key === "gender") {
           const genderRaw = String(value).toLowerCase();
           if (genderRaw.startsWith("m") || genderRaw === "masculino") value = "Male";
@@ -420,10 +551,11 @@ export function CompetitorsManager({
           validationErrors.push({ row: rowIndex + 2, error: { message: "Falta fecha o edad" }, data: participantData });
           return;
         }
-        const { age, birthDate: _ignoredBirthDate, ...rest } = validationResult.data;
+        const { age, birthDate: _ignoredBirthDate, isSpecial, ...rest } = validationResult.data;
         const normalizedParticipant: ParticipantInput = {
-          ...(rest as Omit<ParticipantInput, "birthDate">),
+          ...(rest as Omit<ParticipantInput, "birthDate" | "isSpecial">),
           birthDate,
+          isSpecial: Boolean(isSpecial),
         };
         validParticipants.push(normalizedParticipant);
       } else {
@@ -488,6 +620,8 @@ export function CompetitorsManager({
     setSelectedParticipants(new Set(participants.map((p) => p.id)));
   };
 
+  const selectedCount = selectedParticipants.size;
+
   const renderParticipantRow = (p: Participant) => {
     const age = calculateAge(p.birthDate, raceDate, ageCalculationMethod);
     const isSelected = selectedParticipants.has(p.id);
@@ -505,6 +639,15 @@ export function CompetitorsManager({
         <TableCell>{p.distance}</TableCell>
         <TableCell className="hidden md:table-cell">
           {p.categoryId ? <Badge variant="secondary">{categoryMap[p.categoryId] || "N/A"}</Badge> : <Badge variant="outline">Sin categoría</Badge>}
+        </TableCell>
+        <TableCell className="hidden sm:table-cell">
+          {p.isSpecial ? (
+            <Badge variant="default" className="gap-1 text-xs">
+              <Sparkles className="h-3 w-3" /> Especial
+            </Badge>
+          ) : (
+            <span className="text-xs text-muted-foreground">-</span>
+          )}
         </TableCell>
         <TableCell className="hidden xl:table-cell">{[p.city, p.province, p.country].filter(Boolean).join(", ") || "-"}</TableCell>
         {isAdmin && (
@@ -562,7 +705,14 @@ export function CompetitorsManager({
             <p className="text-sm text-muted-foreground">
               {age ?? "-"} años | {p.distance} | {p.gender === "Male" ? "Masculino" : p.gender === "Female" ? "Femenino" : "Otro"}
             </p>
-            {p.categoryId && <Badge variant="secondary" className="mt-1">{categoryMap[p.categoryId] || "N/A"}</Badge>}
+            <div className="mt-1 flex flex-wrap gap-2">
+              {p.categoryId && <Badge variant="secondary">{categoryMap[p.categoryId] || "N/A"}</Badge>}
+              {p.isSpecial && (
+                <Badge variant="default" className="gap-1 text-xs">
+                  <Sparkles className="h-3 w-3" /> Especial
+                </Badge>
+              )}
+            </div>
           </div>
           <div className="text-sm text-muted-foreground">
             {[p.city, p.province, p.country].filter(Boolean).join(", ") || "Sin ubicación"}
@@ -590,6 +740,13 @@ export function CompetitorsManager({
               className="hidden"
               accept=".xlsx, .xls, .csv"
             />
+            <Button
+              variant="secondary"
+              onClick={() => setIsAssignmentDialogOpen(true)}
+              disabled={participants.length === 0}
+            >
+              <Sparkles className="mr-2 h-4 w-4" /> Asignar categorías
+            </Button>
             <Button
               variant="destructive"
               disabled={selectedParticipants.size === 0 || isBulkDeleting}
@@ -621,6 +778,7 @@ export function CompetitorsManager({
                 <TableHead className="hidden md:table-cell">Género</TableHead>
                 <TableHead>Distancia</TableHead>
                 <TableHead className="hidden md:table-cell">Categoría</TableHead>
+                <TableHead className="hidden sm:table-cell">Especial</TableHead>
                 <TableHead className="hidden xl:table-cell">Ubicación</TableHead>
                 {isAdmin && <TableHead className="text-right">Acciones</TableHead>}
               </TableRow>
@@ -762,6 +920,26 @@ export function CompetitorsManager({
               </div>
               <FormField
                 control={form.control}
+                name="isSpecial"
+                render={({ field }) => (
+                  <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-3">
+                    <FormControl>
+                      <Checkbox
+                        checked={field.value}
+                        onCheckedChange={(checked) => field.onChange(Boolean(checked))}
+                      />
+                    </FormControl>
+                    <div className="space-y-1 leading-none">
+                      <FormLabel>Categoría especial</FormLabel>
+                      <p className="text-sm text-muted-foreground">
+                        Marca a las personas con capacidades diferentes u otra categoría destacada.
+                      </p>
+                    </div>
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
                 name="city"
                 render={({ field }) => (
                   <FormItem>
@@ -809,6 +987,139 @@ export function CompetitorsManager({
               </DialogFooter>
             </form>
           </Form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isAssignmentDialogOpen} onOpenChange={setIsAssignmentDialogOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Asignar categorías</DialogTitle>
+            <DialogDescription>
+              Actualiza manualmente o recalcula las categorías de los competidores seleccionados o de un rango de dorsales.
+            </DialogDescription>
+          </DialogHeader>
+          <Tabs value={assignmentTab} onValueChange={(value) => setAssignmentTab(value as "auto" | "manual" | "range")}
+            className="mt-2"
+          >
+            <TabsList className="grid grid-cols-3">
+              <TabsTrigger value="auto">Automático</TabsTrigger>
+              <TabsTrigger value="manual">Manual</TabsTrigger>
+              <TabsTrigger value="range">Por rango</TabsTrigger>
+            </TabsList>
+            <TabsContent value="auto" className="space-y-4 pt-4">
+              <p className="text-sm text-muted-foreground">
+                Recalcula la categoría según edad, género y distancia. Puedes aplicarlo a todos o solo a los seleccionados.
+              </p>
+              <div className="space-y-2">
+                <Label>Destino</Label>
+                <RadioGroup value={autoTarget} onValueChange={(value) => setAutoTarget(value as "selected" | "all")}>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="selected" id="auto-selected" />
+                    <Label htmlFor="auto-selected" className="font-normal">
+                      Solo seleccionados ({selectedCount})
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="all" id="auto-all" />
+                    <Label htmlFor="auto-all" className="font-normal">
+                      Todos los competidores ({participants.length})
+                    </Label>
+                  </div>
+                </RadioGroup>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="auto-distance"
+                    checked={autoDistanceEnabled}
+                    onCheckedChange={(checked) => setAutoDistanceEnabled(Boolean(checked))}
+                  />
+                  <Label htmlFor="auto-distance" className="font-normal">
+                    Cambiar distancia antes de recalcular
+                  </Label>
+                </div>
+                {autoDistanceEnabled && (
+                  <div>
+                    <Label>Distancia a aplicar</Label>
+                    <Select value={autoDistanceOverride} onValueChange={(value) => setAutoDistanceOverride(value as Participant["distance"]) }>
+                      <SelectTrigger className="mt-1">
+                        <SelectValue placeholder="Selecciona distancia" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="5k">5k</SelectItem>
+                        <SelectItem value="10k">10k</SelectItem>
+                        <SelectItem value="21k">21k</SelectItem>
+                        <SelectItem value="42k">42k</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+            <TabsContent value="manual" className="space-y-4 pt-4">
+              <p className="text-sm text-muted-foreground">
+                Asigna directamente la categoría elegida a los competidores seleccionados.
+              </p>
+              <div className="space-y-2">
+                <Label>Categoría destino</Label>
+                <Select value={manualCategoryId} onValueChange={setManualCategoryId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecciona una categoría" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Sin categoría</SelectItem>
+                    {orderedCategories.map((category) => (
+                      <SelectItem key={category.id} value={category.id}>
+                        {category.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Se aplicará a {selectedCount} competidor(es) seleccionado(s).
+              </p>
+            </TabsContent>
+            <TabsContent value="range" className="space-y-4 pt-4">
+              <p className="text-sm text-muted-foreground">
+                Define un rango de dorsales, asigna una distancia y deja que el sistema reacomode la categoría automáticamente.
+              </p>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Dorsal desde</Label>
+                  <Input value={rangeValues.fromBib} onChange={(event) => setRangeValues((prev) => ({ ...prev, fromBib: event.target.value }))} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Dorsal hasta</Label>
+                  <Input value={rangeValues.toBib} onChange={(event) => setRangeValues((prev) => ({ ...prev, toBib: event.target.value }))} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Distancia</Label>
+                <Select value={rangeValues.distance} onValueChange={(value) => setRangeValues((prev) => ({ ...prev, distance: value as Participant["distance"] }))}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecciona distancia" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="5k">5k</SelectItem>
+                    <SelectItem value="10k">10k</SelectItem>
+                    <SelectItem value="21k">21k</SelectItem>
+                    <SelectItem value="42k">42k</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </TabsContent>
+          </Tabs>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="secondary">
+                Cancelar
+              </Button>
+            </DialogClose>
+            <Button onClick={handleAssignmentSubmit} disabled={isAssigning}>
+              Guardar cambios
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

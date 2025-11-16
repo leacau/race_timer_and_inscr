@@ -32,12 +32,6 @@ const modeOptions: { value: TimingMode; label: string }[] = [
   { value: "category", label: "Por categoría" },
 ];
 
-const formatStatus = (participant: Participant) => {
-  if (participant.finishTime) return { label: "Finalizado", variant: "default" as const };
-  if (participant.startTime) return { label: "En carrera", variant: "secondary" as const };
-  return { label: "Pendiente", variant: "outline" as const };
-};
-
 const emptyTime = "00:00:00.00";
 
 export function TimingDashboard({
@@ -140,6 +134,27 @@ export function TimingDashboard({
     return lookup;
   }, [groups]);
 
+  const finishers = useMemo(() => {
+    return participants
+      .filter((participant) => participant.finishTime && participant.startTime)
+      .sort((a, b) => (a.finishTime! - b.finishTime!));
+  }, [participants]);
+
+  const categoryArrivals = useMemo(() => {
+    const map = new Map<string, { label: string; members: Participant[] }>();
+    finishers.forEach((participant) => {
+      const categoryId = participant.categoryId ?? "__sin_categoria__";
+      const label = participant.categoryId ? categoriesMap[participant.categoryId] ?? "Sin categoría" : "Sin categoría";
+      if (!map.has(categoryId)) {
+        map.set(categoryId, { label, members: [] });
+      }
+      map.get(categoryId)!.members.push(participant);
+    });
+    return Array.from(map.entries())
+      .sort((a, b) => a[1].label.localeCompare(b[1].label))
+      .map(([key, value]) => ({ key, ...value }));
+  }, [finishers, categoriesMap]);
+
   const getGroupKeyForParticipant = (participant: Participant, currentMode: TimingMode) => {
     if (currentMode === "general") return "general";
     if (currentMode === "distance") return `distance:${participant.distance}`;
@@ -203,22 +218,6 @@ export function TimingDashboard({
     } finally {
       setIsSavingManual(false);
     }
-  };
-
-  const sortedParticipants = useMemo(() => {
-    return [...participants].sort((a, b) =>
-      a.bibNumber.localeCompare(b.bibNumber, undefined, { numeric: true, sensitivity: "base" })
-    );
-  }, [participants]);
-
-  const renderElapsed = (participant: Participant) => {
-    if (participant.finishTime && participant.startTime) {
-      return formatElapsedTime(participant.finishTime - participant.startTime);
-    }
-    if (participant.startTime) {
-      return formatElapsedTime(now - participant.startTime);
-    }
-    return emptyTime;
   };
 
   return (
@@ -309,43 +308,99 @@ export function TimingDashboard({
         </Card>
       )}
 
-      <div className="overflow-x-auto rounded-md border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Dorsal</TableHead>
-              <TableHead>Nombre</TableHead>
-              <TableHead className="hidden md:table-cell">Categoría</TableHead>
-              <TableHead>Distancia</TableHead>
-              <TableHead>Estado</TableHead>
-              <TableHead>Tiempo</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {sortedParticipants.map((participant) => {
-              const status = formatStatus(participant);
-              return (
-                <TableRow key={participant.id}>
-                  <TableCell className="font-semibold">{participant.bibNumber}</TableCell>
-                  <TableCell>{`${participant.name} ${participant.surname}`}</TableCell>
-                  <TableCell className="hidden md:table-cell">
-                    {participant.categoryId ? (
-                      <Badge variant="secondary">{categoriesMap[participant.categoryId] || "N/A"}</Badge>
-                    ) : (
-                      <Badge variant="outline">Sin categoría</Badge>
-                    )}
-                  </TableCell>
-                  <TableCell>{participant.distance}</TableCell>
-                  <TableCell>
-                    <Badge variant={status.variant}>{status.label}</Badge>
-                  </TableCell>
-                  <TableCell className="font-mono">{renderElapsed(participant)}</TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Lista general de llegadas</CardTitle>
+          <CardDescription>Participantes ordenados por hora de arribo.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {finishers.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Aún no se registraron llegadas.</p>
+          ) : (
+            <div className="overflow-x-auto rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>#</TableHead>
+                    <TableHead>Dorsal</TableHead>
+                    <TableHead>Nombre</TableHead>
+                    <TableHead className="hidden md:table-cell">Categoría</TableHead>
+                    <TableHead>Distancia</TableHead>
+                    <TableHead>Tiempo</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {finishers.map((participant, index) => (
+                    <TableRow key={participant.id}>
+                      <TableCell className="font-semibold">{index + 1}</TableCell>
+                      <TableCell className="font-semibold">{participant.bibNumber}</TableCell>
+                      <TableCell>{`${participant.name} ${participant.surname}`}</TableCell>
+                      <TableCell className="hidden md:table-cell">
+                        {participant.categoryId ? (
+                          <Badge variant="secondary">{categoriesMap[participant.categoryId] || "Sin categoría"}</Badge>
+                        ) : (
+                          <Badge variant="outline">Sin categoría</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>{participant.distance}</TableCell>
+                      <TableCell className="font-mono">
+                        {formatElapsedTime((participant.finishTime ?? 0) - (participant.startTime ?? 0))}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Clasificación en vivo por categoría</CardTitle>
+          <CardDescription>Se actualiza automáticamente con cada llegada registrada manualmente.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {categoryArrivals.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Todavía no hay categorías con llegadas registradas.</p>
+          ) : (
+            <div className="space-y-6">
+              {categoryArrivals.map((category) => (
+                <div key={category.key} className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-semibold">{category.label}</h4>
+                    <Badge variant="secondary">{category.members.length}</Badge>
+                  </div>
+                  <div className="overflow-x-auto rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>#</TableHead>
+                          <TableHead>Dorsal</TableHead>
+                          <TableHead>Nombre</TableHead>
+                          <TableHead>Tiempo</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {category.members.map((participant, index) => (
+                          <TableRow key={participant.id}>
+                            <TableCell className="font-semibold">{index + 1}</TableCell>
+                            <TableCell className="font-semibold">{participant.bibNumber}</TableCell>
+                            <TableCell>{`${participant.name} ${participant.surname}`}</TableCell>
+                            <TableCell className="font-mono">
+                              {formatElapsedTime((participant.finishTime ?? 0) - (participant.startTime ?? 0))}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

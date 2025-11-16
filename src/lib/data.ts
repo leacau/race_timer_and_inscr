@@ -19,7 +19,14 @@ export async function getParticipants(): Promise<Participant[]> {
     const participantsCol = collection(db, "participants");
     const q = query(participantsCol, orderBy("bibNumber"));
     const participantSnapshot = await getDocs(q);
-    const participantList = participantSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Participant));
+    const participantList = participantSnapshot.docs.map(doc => {
+        const data = doc.data() as ParticipantFirestoreData;
+        return {
+            id: doc.id,
+            ...data,
+            isSpecial: data.isSpecial ?? false,
+        } satisfies Participant;
+    });
     return participantList;
 }
 
