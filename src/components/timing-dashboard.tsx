@@ -14,6 +14,7 @@ import { AppContext } from "@/context/app-context";
 import { formatElapsedTime } from "@/lib/utils";
 import { startTimingGroup, TimingMode, updateParticipantTime } from "@/lib/actions";
 import { cn } from "@/lib/utils";
+import { Lock, Unlock } from "lucide-react";
 
 const distanceOrder: Record<Participant["distance"], number> = { "5k": 1, "10k": 2, "21k": 3, "42k": 4 };
 
@@ -49,6 +50,10 @@ export function TimingDashboard({
   const [manualBib, setManualBib] = useState("");
   const [isSavingManual, setIsSavingManual] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const [isLocked, setIsLocked] = useState(false);
+  const [stoppedGroups, setStoppedGroups] = useState<
+    Record<string, { pausedAt: number; referenceStart: number }>
+  >({});
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 500);
@@ -126,6 +131,21 @@ export function TimingDashboard({
       }));
   }, [mode, participants, categoriesMap]);
 
+  useEffect(() => {
+    setStoppedGroups((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      Object.entries(prev).forEach(([key, value]) => {
+        const group = groups.find((g) => g.key === key);
+        if (!group || !group.startTime || group.startTime !== value.referenceStart) {
+          delete next[key];
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [groups]);
+
   const startTimeLookup = useMemo(() => {
     const lookup: Record<string, number | null> = {};
     groups.forEach((group) => {
@@ -164,12 +184,22 @@ export function TimingDashboard({
 
   const handleStartGroup = async (group: TimingGroup) => {
     if (!isAdmin) return;
-    if (group.startTime && !window.confirm("Ya existe un inicio registrado. ¿Deseas reiniciar este cronómetro?")) {
+    if (
+      group.startTime &&
+      !stoppedGroups[group.key] &&
+      !window.confirm("Ya existe un inicio registrado. ¿Deseas reiniciar este cronómetro?")
+    ) {
       return;
     }
     setStartingGroupKey(group.key);
     try {
       await startTimingGroup(mode, group.actionGroupId);
+      setStoppedGroups((prev) => {
+        if (!prev[group.key]) return prev;
+        const next = { ...prev };
+        delete next[group.key];
+        return next;
+      });
       toast({
         title: "Cronómetro iniciado",
         description: `Se inició la largada para ${group.label}.`,
@@ -180,6 +210,14 @@ export function TimingDashboard({
     } finally {
       setStartingGroupKey(null);
     }
+  };
+
+  const handleStopGroup = (group: TimingGroup) => {
+    if (!group.startTime) return;
+    setStoppedGroups((prev) => ({
+      ...prev,
+      [group.key]: { pausedAt: Date.now(), referenceStart: group.startTime! },
+    }));
   };
 
   const handleManualCapture = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -224,7 +262,23 @@ export function TimingDashboard({
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Modo de largada</CardTitle>
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <CardTitle>Modo de largada</CardTitle>
+            {isAdmin && (
+              <Button
+                type="button"
+                variant={isLocked ? "default" : "outline"}
+                size="sm"
+                onClick={() => setIsLocked((value) => !value)}
+                className="flex items-center gap-2"
+              >
+                {isLocked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
+                <span className="text-xs font-semibold uppercase">
+                  {isLocked ? "Bloqueado" : "Desbloqueado"}
+                </span>
+              </Button>
+            )}
+          </div>
           <CardDescription>Elige cómo quieres administrar los cronómetros de la carrera.</CardDescription>
         </CardHeader>
         <CardContent>
@@ -269,16 +323,39 @@ export function TimingDashboard({
               <div>
                 <p className="text-xs uppercase text-muted-foreground">Cronómetro</p>
                 <p className="font-mono text-3xl">
-                  {group.startTime ? formatElapsedTime(now - group.startTime) : emptyTime}
+                  {group.startTime
+                    ? formatElapsedTime(
+                        Math.max(
+                          0,
+                          (stoppedGroups[group.key]?.pausedAt ?? now) - group.startTime
+                        )
+                      )
+                    : emptyTime}
                 </p>
               </div>
               {isAdmin && (
                 <Button
-                  onClick={() => handleStartGroup(group)}
-                  disabled={startingGroupKey === group.key}
-                  variant={group.startTime ? "outline" : "default"}
+                  onClick={() =>
+                    group.startTime && stoppedGroups[group.key]
+                      ? handleStartGroup(group)
+                      : group.startTime
+                      ? handleStopGroup(group)
+                      : handleStartGroup(group)
+                  }
+                  disabled={startingGroupKey === group.key || isLocked}
+                  variant={
+                    group.startTime
+                      ? stoppedGroups[group.key]
+                        ? "default"
+                        : "outline"
+                      : "default"
+                  }
                 >
-                  {group.startTime ? "Reiniciar" : "Iniciar"}
+                  {group.startTime
+                    ? stoppedGroups[group.key]
+                      ? "Reiniciar"
+                      : "Detener"
+                    : "Inicio"}
                 </Button>
               )}
             </CardContent>
