@@ -375,6 +375,24 @@ export async function bulkAddCategories(
 
   const sanitizeSheetName = (value: string) => value.trim().replace(/\s+/g, ' ');
 
+  const replaceInsensitive = (text: string, search: string, replacement: string) => {
+    if (!search) return text;
+    let cursor = 0;
+    let output = "";
+    const lowerText = text.toLowerCase();
+    const lowerSearch = search.toLowerCase();
+    while (cursor < text.length) {
+      const index = lowerText.indexOf(lowerSearch, cursor);
+      if (index === -1) {
+        output += text.slice(cursor);
+        break;
+      }
+      output += text.slice(cursor, index) + replacement;
+      cursor = index + search.length;
+    }
+    return output;
+  };
+
   const getDistanceValue = (distance: string) => {
     const numeric = distance.replace(/[^0-9]/g, '');
     return numeric || distance;
@@ -399,7 +417,7 @@ export async function bulkAddCategories(
 
     let result = template;
     Object.entries(replacements).forEach(([key, value]) => {
-      result = result.replace(new RegExp(key, 'gi'), value);
+      result = replaceInsensitive(result, key, value);
     });
     return sanitizeSheetName(result);
   };

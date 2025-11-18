@@ -37,6 +37,7 @@ type ArrivalEntry = {
   surname: string;
   categoryId: string | null;
   distance: Participant["distance"];
+  gender: Participant["gender"];
   startTime: number;
   finishTime: number;
   isDuplicate?: boolean;
@@ -73,10 +74,7 @@ const sanitizeSheetName = (value: string) => {
   return cleaned.slice(0, 30);
 };
 
-const escapePdfText = (text: string) =>
-  text.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
-
-const wrapPdfLine = (line: string, maxChars = 100) => {
+const wrapText = (line: string, maxChars = 100) => {
   if (!line) return [""];
   const words = line.split(/\s+/);
   const result: string[] = [];
@@ -101,13 +99,42 @@ const wrapPdfLine = (line: string, maxChars = 100) => {
   return result.length > 0 ? result : [line];
 };
 
-const buildPdfFromLines = (title: string, lines: string[]) => {
+const encodePdfText = (text: string) => {
+  return text
+    .split("")
+    .map((char) => {
+      const code = char.charCodeAt(0);
+      if (char === "\\" || char === "(" || char === ")") {
+        return `\\${char}`;
+      }
+      if (code < 32 || code > 126) {
+        return `\\${code.toString(8).padStart(3, "0")}`;
+      }
+      return char;
+    })
+    .join("");
+};
+
+type PdfSection = {
+  title: string;
+  headers: string[];
+  rows: (string | number)[][];
+  columnWeights?: number[];
+};
+
+const buildTablesPdf = (title: string, sections: PdfSection[]) => {
   const pageWidth = 595.28;
   const pageHeight = 841.89;
   const margin = 40;
-  const lineHeight = 14;
+  const lineGap = 18;
+  const rowPadding = 6;
+  const textLineHeight = 12;
+  const tableWidth = pageWidth - margin * 2;
   const encoder = new TextEncoder();
-  const safeLines = lines.length > 0 ? lines : ["Sin datos para exportar."];
+  const safeSections =
+    sections.length > 0
+      ? sections
+      : [{ title: "Sin datos", headers: ["Información"], rows: [["No hay registros para mostrar"]] }];
   const pageContents: string[] = [];
   let currentY = pageHeight - margin;
   let currentContent = "";
@@ -117,35 +144,117 @@ const buildPdfFromLines = (title: string, lines: string[]) => {
       pageContents.push(currentContent);
     }
     currentY = pageHeight - margin;
-    currentContent = `BT /F1 16 Tf ${margin} ${currentY} Td (${escapePdfText(title)}) Tj ET\n`;
-    currentY -= lineHeight * 1.5;
+    currentContent = `BT /F2 16 Tf ${margin} ${currentY} Td (${encodePdfText(title)}) Tj ET\n`;
+    currentY -= lineGap * 2;
+  };
+
+  const columnPadding = 8;
+
+  const wrapCell = (text: string, width: number) => {
+    const maxChars = Math.max(1, Math.floor((width - columnPadding * 2) / 5.2));
+    return wrapText(text, maxChars);
+  };
+
+  const measureRowHeight = (cells: string[], columnWidths: number[]) => {
+    const maxLines = cells.reduce((acc, cell, index) => {
+      const lines = wrapCell(cell, columnWidths[index]).length;
+      return Math.max(acc, lines);
+    }, 1);
+    return rowPadding * 2 + maxLines * textLineHeight;
+  };
+
+  const drawRow = (
+    cells: string[],
+    columnWidths: number[],
+    options: { background?: [number, number, number]; textColor?: [number, number, number]; font: string; fontSize: number }
+  ) => {
+    const normalized = cells.map((cell) => cell ?? "");
+    const rowHeight = measureRowHeight(normalized, columnWidths);
+    const top = currentY;
+    const bottom = currentY - rowHeight;
+    const borderColor = "0.82 0.86 0.91";
+    if (options.background) {
+      currentContent += `${options.background.join(" ")} rg\n${margin} ${bottom} ${tableWidth} ${rowHeight} re f\n`;
+    }
+    currentContent += `${borderColor} RG\n${margin} ${bottom} ${tableWidth} ${rowHeight} re S\n`;
+    let xCursor = margin;
+    normalized.forEach((cell, index) => {
+      if (index > 0) {
+        currentContent += `${xCursor} ${bottom} m ${xCursor} ${top} l S\n`;
+      }
+      const lines = wrapCell(cell, columnWidths[index]);
+      let textY = top - rowPadding;
+      const textColor = options.textColor ?? [0, 0, 0];
+      lines.forEach((line) => {
+        textY -= textLineHeight;
+        currentContent += `BT ${options.font} ${options.fontSize} Tf ${textColor.join(" ")} rg ${xCursor + columnPadding} ${textY} Td (${encodePdfText(
+          line
+        )}) Tj ET\n`;
+      });
+      xCursor += columnWidths[index];
+    });
+    currentY -= rowHeight;
+    currentContent += "0 0 0 rg\n";
+  };
+
+  const ensureSpace = (heightNeeded: number) => {
+    if (currentY - heightNeeded < margin) {
+      startNewPage();
+    }
   };
 
   startNewPage();
 
-  safeLines.forEach((line) => {
-    const fragments = wrapPdfLine(line);
-    fragments.forEach((fragment) => {
-      if (currentY <= margin) {
-        startNewPage();
-      }
-      currentContent += `BT /F1 10 Tf ${margin} ${currentY} Td (${escapePdfText(fragment)}) Tj ET\n`;
-      currentY -= lineHeight;
+  safeSections.forEach((section, sectionIndex) => {
+    const rows = section.rows.length > 0 ? section.rows : [["Sin registros"]];
+    const weights =
+      section.columnWeights && section.columnWeights.length === section.headers.length ? section.columnWeights : undefined;
+    const totalWeight = weights?.reduce((sum, value) => sum + value, 0) ?? section.headers.length;
+    const columnWidths = section.headers.map((_, index) => (tableWidth * (weights?.[index] ?? 1)) / totalWeight);
+    const headerHeight = measureRowHeight(section.headers.map(String), columnWidths);
+    const dataHeights = rows.map((row) => measureRowHeight(row.map((cell) => String(cell ?? "")), columnWidths));
+    const estimatedHeight = lineGap + headerHeight + dataHeights.reduce((sum, value) => sum + value, 0) + 12;
+
+    ensureSpace(estimatedHeight);
+
+    currentContent += `BT /F2 14 Tf ${margin} ${currentY} Td (${encodePdfText(section.title)}) Tj ET\n`;
+    currentY -= lineGap;
+
+    drawRow(section.headers.map(String), columnWidths, {
+      background: [0.16, 0.2, 0.33],
+      textColor: [1, 1, 1],
+      font: "/F2",
+      fontSize: 10,
     });
+
+    rows.forEach((row, rowIndex) => {
+      drawRow(
+        row.map((cell) => String(cell ?? "")),
+        columnWidths,
+        {
+          background: rowIndex % 2 === 0 ? [0.94, 0.96, 1] : undefined,
+          textColor: [0.05, 0.07, 0.12],
+          font: "/F1",
+          fontSize: 10,
+        }
+      );
+    });
+
+    currentY -= 12;
+    if (sectionIndex < safeSections.length - 1 && currentY < margin + 120) {
+      startNewPage();
+    }
   });
 
   if (currentContent) {
     pageContents.push(currentContent);
   }
 
-  if (pageContents.length === 0) {
-    pageContents.push(`BT /F1 10 Tf ${margin} ${pageHeight - margin} Td (Sin datos) Tj ET\n`);
-  }
-
   const totalPages = pageContents.length;
-  const objects: string[] = new Array(3 + totalPages * 2 + 1).fill("");
+  const fontCount = 2;
+  const fontStartIndex = 3 + totalPages * 2;
+  const objects: string[] = new Array(fontStartIndex + fontCount).fill("");
   const kids: string[] = [];
-  const fontIndex = 3 + totalPages * 2;
 
   objects[1] = "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj";
   objects[2] = `2 0 obj\n<< /Type /Pages /Kids [] /Count ${totalPages} >>\nendobj`;
@@ -155,12 +264,13 @@ const buildPdfFromLines = (title: string, lines: string[]) => {
     const pageIndex = contentIndex + 1;
     const length = encoder.encode(content).length;
     objects[contentIndex] = `${contentIndex} 0 obj\n<< /Length ${length} >>\nstream\n${content}endstream\nendobj`;
-    objects[pageIndex] = `${pageIndex} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Contents ${contentIndex} 0 R /Resources << /Font << /F1 ${fontIndex} 0 R >> >> >>\nendobj`;
+    objects[pageIndex] = `${pageIndex} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Contents ${contentIndex} 0 R /Resources << /Font << /F1 ${fontStartIndex} 0 R /F2 ${fontStartIndex + 1} 0 R >> >> >>\nendobj`;
     kids.push(`${pageIndex} 0 R`);
   });
 
   objects[2] = `2 0 obj\n<< /Type /Pages /Kids [${kids.join(" ")}] /Count ${totalPages} >>\nendobj`;
-  objects[fontIndex] = `${fontIndex} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj`;
+  objects[fontStartIndex] = `${fontStartIndex} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj`;
+  objects[fontStartIndex + 1] = `${fontStartIndex + 1} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj`;
 
   let pdf = "%PDF-1.4\n";
   const offsets: number[] = new Array(objects.length).fill(0);
@@ -332,6 +442,7 @@ export function TimingDashboard({
         surname: participant.surname,
         categoryId: participant.categoryId ?? null,
         distance: participant.distance,
+        gender: participant.gender,
         startTime: participant.startTime!,
         finishTime: participant.finishTime!,
       }));
@@ -362,6 +473,25 @@ export function TimingDashboard({
       .sort((a, b) => a[1].label.localeCompare(b[1].label))
       .map(([key, value]) => ({ key, ...value }));
   }, [finishers, categoriesMap]);
+
+  const genderArrivals = useMemo(() => {
+    const map = new Map<Participant["gender"], ArrivalEntry[]>();
+    finishers.forEach((arrival) => {
+      const gender = arrival.gender;
+      if (!map.has(gender)) {
+        map.set(gender, []);
+      }
+      map.get(gender)!.push(arrival);
+    });
+    return Array.from(map.entries())
+      .map(([gender, members]) => ({
+        key: gender,
+        label: genderLabels[gender] ?? gender,
+        members,
+      }))
+      .filter((entry) => entry.members.length > 0)
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [finishers]);
 
   const getGroupKeyForParticipant = (participant: Participant, currentMode: TimingMode) => {
     if (currentMode === "general") return "general";
@@ -489,6 +619,7 @@ export function TimingDashboard({
           surname: participant.surname,
           categoryId: participant.categoryId ?? null,
           distance: participant.distance,
+          gender: participant.gender,
           startTime: effectiveStartTime,
           finishTime,
           isDuplicate: true,
@@ -554,14 +685,21 @@ export function TimingDashboard({
       return;
     }
 
-    const header = "Posición | Dorsal | Nombre completo | Categoría | Distancia | Tiempo";
-    const lines = [header, "-".repeat(header.length)];
-    rows.forEach((row) => {
-      lines.push(
-        `${row["Posición"]} | ${row.Dorsal} | ${row.Nombre} ${row.Apellido} | ${row.Categoría} | ${row.Distancia} | ${row.Tiempo}`
-      );
-    });
-    const pdf = buildPdfFromLines("Llegadas generales", lines);
+    const pdf = buildTablesPdf("Llegadas generales", [
+      {
+        title: "Clasificación general",
+        headers: ["#", "Dorsal", "Nombre completo", "Categoría", "Distancia", "Tiempo"],
+        columnWeights: [0.5, 0.8, 1.4, 1.1, 0.8, 0.7],
+        rows: rows.map((row) => [
+          row["Posición"],
+          row.Dorsal,
+          `${row.Nombre} ${row.Apellido}`.trim(),
+          row["Categoría"],
+          String(row.Distancia).toUpperCase(),
+          row.Tiempo,
+        ]),
+      },
+    ]);
     downloadBlob(pdf, `llegadas_general_${timestamp}.pdf`);
   };
 
@@ -590,21 +728,67 @@ export function TimingDashboard({
       return;
     }
 
-    const lines: string[] = [];
-    categoryArrivals.forEach((category) => {
-      lines.push(category.label.toUpperCase());
-      lines.push("Posición | Dorsal | Nombre | Tiempo");
-      category.members.forEach((arrival, index) => {
-        lines.push(
-          `${index + 1} | ${arrival.displayBib} | ${arrival.name} ${arrival.surname} | ${formatElapsedTime(
-            arrival.finishTime - arrival.startTime
-          )}`
-        );
-      });
-      lines.push("");
-    });
-    const pdf = buildPdfFromLines("Clasificación por categoría", lines);
+    const pdf = buildTablesPdf(
+      "Clasificación por categoría",
+      categoryArrivals.map((category) => ({
+        title: category.label,
+        headers: ["#", "Dorsal", "Nombre", "Tiempo"],
+        columnWeights: [0.5, 0.7, 1.8, 0.7],
+        rows: category.members.map((arrival, index) => [
+          index + 1,
+          arrival.displayBib,
+          `${arrival.name} ${arrival.surname}`,
+          formatElapsedTime(arrival.finishTime - arrival.startTime),
+        ]),
+      }))
+    );
     downloadBlob(pdf, `clasificacion_categorias_${timestamp}.pdf`);
+  };
+
+  const exportByGender = (format: "xlsx" | "pdf") => {
+    if (genderArrivals.length === 0) {
+      toast({ title: "Sin datos", description: "Todavía no hay llegadas clasificadas por sexo." });
+      return;
+    }
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+
+    if (format === "xlsx") {
+      const workbook = XLSX.utils.book_new();
+      genderArrivals.forEach((genderGroup) => {
+        const sheetRows = genderGroup.members.map((arrival, index) => ({
+          "Posición": index + 1,
+          Dorsal: arrival.displayBib,
+          Nombre: `${arrival.name} ${arrival.surname}`,
+          Categoría: arrival.categoryId ? categoriesMap[arrival.categoryId] ?? "Sin categoría" : "Sin categoría",
+          Distancia: arrival.distance,
+          Tiempo: formatElapsedTime(arrival.finishTime - arrival.startTime),
+        }));
+        const worksheet = XLSX.utils.json_to_sheet(
+          sheetRows.length > 0 ? sheetRows : [{ Aviso: "Sin llegadas registradas" }]
+        );
+        XLSX.utils.book_append_sheet(workbook, worksheet, sanitizeSheetName(genderGroup.label));
+      });
+      XLSX.writeFile(workbook, `clasificacion_genero_${timestamp}.xlsx`);
+      return;
+    }
+
+    const pdf = buildTablesPdf(
+      "Clasificación general por sexo",
+      genderArrivals.map((genderGroup) => ({
+        title: genderGroup.label,
+        headers: ["#", "Dorsal", "Nombre", "Categoría", "Distancia", "Tiempo"],
+        columnWeights: [0.5, 0.7, 1.6, 1.2, 0.8, 0.7],
+        rows: genderGroup.members.map((arrival, index) => [
+          index + 1,
+          arrival.displayBib,
+          `${arrival.name} ${arrival.surname}`,
+          arrival.categoryId ? categoriesMap[arrival.categoryId] ?? "Sin categoría" : "Sin categoría",
+          arrival.distance.toUpperCase(),
+          formatElapsedTime(arrival.finishTime - arrival.startTime),
+        ]),
+      }))
+    );
+    downloadBlob(pdf, `clasificacion_genero_${timestamp}.pdf`);
   };
 
   return (
@@ -843,6 +1027,77 @@ export function TimingDashboard({
                             <TableCell className="font-semibold">{index + 1}</TableCell>
                             <TableCell className="font-semibold">{arrival.displayBib}</TableCell>
                             <TableCell>{`${arrival.name} ${arrival.surname}`}</TableCell>
+                            <TableCell className="font-mono">
+                              {formatElapsedTime(arrival.finishTime - arrival.startTime)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <CardTitle>Clasificación general por sexo</CardTitle>
+              <CardDescription>Visualiza los arribos agrupados por género.</CardDescription>
+            </div>
+            {genderArrivals.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={() => exportByGender("xlsx")}>
+                  XLS por sexo
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => exportByGender("pdf")}>
+                  PDF por sexo
+                </Button>
+              </div>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {genderArrivals.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Aún no se registraron llegadas para esta clasificación.</p>
+          ) : (
+            <div className="space-y-6">
+              {genderArrivals.map((gender) => (
+                <div key={gender.key} className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-semibold">{gender.label}</h4>
+                    <Badge variant="secondary">{gender.members.length}</Badge>
+                  </div>
+                  <div className="overflow-x-auto rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>#</TableHead>
+                          <TableHead>Dorsal</TableHead>
+                          <TableHead>Nombre</TableHead>
+                          <TableHead className="hidden md:table-cell">Categoría</TableHead>
+                          <TableHead>Distancia</TableHead>
+                          <TableHead>Tiempo</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {gender.members.map((arrival, index) => (
+                          <TableRow key={`${gender.key}-${arrival.id}`}>
+                            <TableCell className="font-semibold">{index + 1}</TableCell>
+                            <TableCell className="font-semibold">{arrival.displayBib}</TableCell>
+                            <TableCell>{`${arrival.name} ${arrival.surname}`}</TableCell>
+                            <TableCell className="hidden md:table-cell">
+                              {arrival.categoryId ? (
+                                <Badge variant="secondary">{categoriesMap[arrival.categoryId] || "Sin categoría"}</Badge>
+                              ) : (
+                                <Badge variant="outline">Sin categoría</Badge>
+                              )}
+                            </TableCell>
+                            <TableCell>{arrival.distance}</TableCell>
                             <TableCell className="font-mono">
                               {formatElapsedTime(arrival.finishTime - arrival.startTime)}
                             </TableCell>
