@@ -6,7 +6,14 @@ import { z } from "zod";
 import * as db from "./data";
 import { assignCategory } from "./logic";
 import { generateChipNumber } from "./utils";
-import type { AgeCalculationMethod, Category, CategoryInput, Participant, ParticipantFirestoreData, ParticipantInput } from "./types";
+import type {
+  AgeCalculationMethod,
+  Category,
+  CategoryInput,
+  Participant,
+  ParticipantFirestoreData,
+  ParticipantInput,
+} from "./types";
 
 type SelectionTarget = { type: "selection"; ids: string[] };
 type RangeTarget = { type: "range"; fromBib: string; toBib: string };
@@ -117,6 +124,34 @@ export async function startTimingGroup(mode: TimingMode, groupId?: string | null
 
   revalidatePath("/");
   return { updated: targets.length, startTime };
+}
+
+export async function resetTimingGroup(mode: TimingMode, groupId?: string | null) {
+  const participants = await db.getParticipants();
+  let targets: Participant[] = [];
+
+  if (mode === 'general') {
+    targets = participants;
+  } else if (mode === 'distance') {
+    targets = participants.filter((p) => p.distance === groupId);
+  } else {
+    targets = participants.filter((p) => (p.categoryId ?? null) === (groupId ?? null));
+  }
+
+  if (targets.length === 0) {
+    return { updated: 0 };
+  }
+
+  await db.bulkUpdateParticipants(
+    targets.map((participant) => ({
+      id: participant.id,
+      data: { startTime: null, finishTime: null },
+    }))
+  );
+
+  revalidatePath("/");
+  revalidatePath("/competitors");
+  return { updated: targets.length };
 }
 
 export async function importParticipants(
@@ -309,13 +344,15 @@ const bulkCategorySchema = z.object({
     ),
   distances: z.array(z.string()).min(1),
   genders: z.array(z.string()),
+  nameTemplate: z.string().min(1),
+  genderFormat: z.enum(['long', 'short']).default('long'),
 });
 
 export async function bulkAddCategories(
   data: z.infer<typeof bulkCategorySchema>
 ) {
   const validatedData = bulkCategorySchema.parse(data);
-  const { ageRanges, distances } = validatedData;
+  const { ageRanges, distances, nameTemplate, genderFormat } = validatedData;
   let { genders } = validatedData;
 
   if (genders.length === 0) {
@@ -326,24 +363,65 @@ export async function bulkAddCategories(
     Male: "Masculino",
     Female: "Femenino",
     Any: "General",
+    Other: "Otro",
   };
 
+  const genderShortMap: Record<string, string> = {
+    Male: 'M',
+    Female: 'F',
+    Any: 'G',
+    Other: 'X',
+  };
+
+  const sanitizeSheetName = (value: string) => value.trim().replace(/\s+/g, ' ');
+
+  const getDistanceValue = (distance: string) => {
+    const numeric = distance.replace(/[^0-9]/g, '');
+    return numeric || distance;
+  };
+
+  const buildCategoryName = (
+    template: string,
+    distance: string,
+    gender: string,
+    min: number,
+    max: number
+  ) => {
+    const replacements: Record<string, string> = {
+      '[[distancia]]': getDistanceValue(distance),
+      '[[distancia_label]]': distance.toUpperCase(),
+      '[[genero]]': (genderFormat === 'short' ? genderShortMap[gender] : genderMap[gender]) || gender,
+      '[[genero_largo]]': genderMap[gender] || gender,
+      '[[genero_corto]]': genderShortMap[gender] || gender,
+      '[[edad min]]': String(min),
+      '[[edad max]]': String(max),
+    };
+
+    let result = template;
+    Object.entries(replacements).forEach(([key, value]) => {
+      result = result.replace(new RegExp(key, 'gi'), value);
+    });
+    return sanitizeSheetName(result);
+  };
+
+  const creations: Promise<string>[] = [];
   for (const ageRange of ageRanges) {
     for (const distance of distances) {
       for (const gender of genders) {
-        const genderName = genderMap[gender] || "General";
-        const name = `${genderName} ${ageRange.min}-${ageRange.max} ${distance}`;
+        const name = buildCategoryName(nameTemplate, distance, gender, ageRange.min, ageRange.max);
         const newCategory: CategoryInput = {
           name,
           minAge: ageRange.min,
           maxAge: ageRange.max,
-          distance: distance as Category["distance"],
-          gender: gender as Category["gender"],
+          distance: distance as Category['distance'],
+          gender: gender as Category['gender'],
         };
-        await db.addCategory(newCategory);
+        creations.push(db.addCategory(newCategory));
       }
     }
   }
+
+  await Promise.all(creations);
 
   revalidatePath("/categories");
   revalidatePath("/");

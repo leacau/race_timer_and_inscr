@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo, useState, useContext, useEffect } from "react";
+import * as XLSX from "xlsx";
 import type { Participant, Category } from "@/lib/types";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useToast } from "@/hooks/use-toast";
 import { AppContext } from "@/context/app-context";
 import { formatElapsedTime } from "@/lib/utils";
-import { startTimingGroup, TimingMode, updateParticipantTime } from "@/lib/actions";
+import { resetTimingGroup, startTimingGroup, TimingMode, updateParticipantTime } from "@/lib/actions";
 import { cn } from "@/lib/utils";
 import { Lock, Unlock } from "lucide-react";
 
@@ -29,6 +30,7 @@ type TimingGroup = {
 
 type ArrivalEntry = {
   id: string;
+  participantId: string;
   bibNumber: string;
   displayBib: string;
   name: string;
@@ -47,6 +49,140 @@ const modeOptions: { value: TimingMode; label: string }[] = [
 ];
 
 const emptyTime = "00:00:00.00";
+
+const genderLabels: Record<Participant["gender"], string> = {
+  Male: "Masculino",
+  Female: "Femenino",
+  Other: "Otro",
+};
+
+const downloadBlob = (blob: Blob, filename: string) => {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+};
+
+const sanitizeSheetName = (value: string) => {
+  const cleaned = value.replace(/[\\/?*\[\]:]/g, " ").trim();
+  if (!cleaned) return "Categoría";
+  return cleaned.slice(0, 30);
+};
+
+const escapePdfText = (text: string) =>
+  text.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+
+const wrapPdfLine = (line: string, maxChars = 100) => {
+  if (!line) return [""];
+  const words = line.split(/\s+/);
+  const result: string[] = [];
+  let current = "";
+  words.forEach((word) => {
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length > maxChars) {
+      if (current) {
+        result.push(current);
+        current = word;
+      } else {
+        result.push(candidate);
+        current = "";
+      }
+    } else {
+      current = candidate;
+    }
+  });
+  if (current) {
+    result.push(current);
+  }
+  return result.length > 0 ? result : [line];
+};
+
+const buildPdfFromLines = (title: string, lines: string[]) => {
+  const pageWidth = 595.28;
+  const pageHeight = 841.89;
+  const margin = 40;
+  const lineHeight = 14;
+  const encoder = new TextEncoder();
+  const safeLines = lines.length > 0 ? lines : ["Sin datos para exportar."];
+  const pageContents: string[] = [];
+  let currentY = pageHeight - margin;
+  let currentContent = "";
+
+  const startNewPage = () => {
+    if (currentContent) {
+      pageContents.push(currentContent);
+    }
+    currentY = pageHeight - margin;
+    currentContent = `BT /F1 16 Tf ${margin} ${currentY} Td (${escapePdfText(title)}) Tj ET\n`;
+    currentY -= lineHeight * 1.5;
+  };
+
+  startNewPage();
+
+  safeLines.forEach((line) => {
+    const fragments = wrapPdfLine(line);
+    fragments.forEach((fragment) => {
+      if (currentY <= margin) {
+        startNewPage();
+      }
+      currentContent += `BT /F1 10 Tf ${margin} ${currentY} Td (${escapePdfText(fragment)}) Tj ET\n`;
+      currentY -= lineHeight;
+    });
+  });
+
+  if (currentContent) {
+    pageContents.push(currentContent);
+  }
+
+  if (pageContents.length === 0) {
+    pageContents.push(`BT /F1 10 Tf ${margin} ${pageHeight - margin} Td (Sin datos) Tj ET\n`);
+  }
+
+  const totalPages = pageContents.length;
+  const objects: string[] = new Array(3 + totalPages * 2 + 1).fill("");
+  const kids: string[] = [];
+  const fontIndex = 3 + totalPages * 2;
+
+  objects[1] = "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj";
+  objects[2] = `2 0 obj\n<< /Type /Pages /Kids [] /Count ${totalPages} >>\nendobj`;
+
+  pageContents.forEach((content, index) => {
+    const contentIndex = 3 + index * 2;
+    const pageIndex = contentIndex + 1;
+    const length = encoder.encode(content).length;
+    objects[contentIndex] = `${contentIndex} 0 obj\n<< /Length ${length} >>\nstream\n${content}endstream\nendobj`;
+    objects[pageIndex] = `${pageIndex} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Contents ${contentIndex} 0 R /Resources << /Font << /F1 ${fontIndex} 0 R >> >> >>\nendobj`;
+    kids.push(`${pageIndex} 0 R`);
+  });
+
+  objects[2] = `2 0 obj\n<< /Type /Pages /Kids [${kids.join(" ")}] /Count ${totalPages} >>\nendobj`;
+  objects[fontIndex] = `${fontIndex} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj`;
+
+  let pdf = "%PDF-1.4\n";
+  const offsets: number[] = new Array(objects.length).fill(0);
+
+  for (let i = 1; i < objects.length; i++) {
+    const obj = objects[i];
+    if (!obj) continue;
+    offsets[i] = pdf.length;
+    pdf += `${obj}\n`;
+  }
+
+  const xrefStart = pdf.length;
+  const totalObjects = objects.length - 1;
+  pdf += `xref\n0 ${totalObjects + 1}\n0000000000 65535 f \n`;
+  for (let i = 1; i <= totalObjects; i++) {
+    const offset = String(offsets[i] || 0).padStart(10, "0");
+    pdf += `${offset} 00000 n \n`;
+  }
+  pdf += `trailer\n<< /Size ${totalObjects + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
+
+  return new Blob([pdf], { type: "application/pdf" });
+};
 
 export function TimingDashboard({
   participants,
@@ -86,6 +222,21 @@ export function TimingDashboard({
     const startTimes = groupParticipants.map((p) => p.startTime).filter(Boolean) as number[];
     if (startTimes.length === 0) return null;
     return Math.min(...startTimes);
+  };
+
+  const resolveParticipantsForGroup = (group: TimingGroup) => {
+    if (mode === "general") {
+      return participants;
+    }
+    if (mode === "distance") {
+      return participants.filter((participant) => participant.distance === group.actionGroupId);
+    }
+    return participants.filter((participant) => {
+      if (!group.actionGroupId) {
+        return !participant.categoryId;
+      }
+      return participant.categoryId === group.actionGroupId;
+    });
   };
 
   const groups = useMemo<TimingGroup[]>(() => {
@@ -174,6 +325,7 @@ export function TimingDashboard({
       .filter((participant) => participant.finishTime && participant.startTime)
       .map((participant) => ({
         id: participant.id,
+        participantId: participant.id,
         bibNumber: participant.bibNumber,
         displayBib: participant.bibNumber,
         name: participant.name,
@@ -183,6 +335,13 @@ export function TimingDashboard({
         startTime: participant.startTime!,
         finishTime: participant.finishTime!,
       }));
+  }, [participants]);
+
+  const participantMapById = useMemo(() => {
+    return participants.reduce((acc, participant) => {
+      acc[participant.id] = participant;
+      return acc;
+    }, {} as Record<string, Participant>);
   }, [participants]);
 
   const finishers = useMemo(() => {
@@ -249,6 +408,47 @@ export function TimingDashboard({
     }));
   };
 
+  const handleResetGroup = async (group: TimingGroup) => {
+    if (!group.startTime) return;
+    const confirmReset = window.confirm(
+      "Reseteará el cronómetro y limpiará las llegadas registradas para este grupo. ¿Deseas continuar?"
+    );
+    if (!confirmReset) {
+      return;
+    }
+    setStartingGroupKey(group.key);
+    try {
+      await resetTimingGroup(mode, group.actionGroupId);
+      setStoppedGroups((prev) => {
+        const next = { ...prev };
+        delete next[group.key];
+        return next;
+      });
+      const participantsInGroup = resolveParticipantsForGroup(group);
+      if (participantsInGroup.length > 0) {
+        const ids = new Set(participantsInGroup.map((participant) => participant.id));
+        const bibs = new Set(participantsInGroup.map((participant) => participant.bibNumber));
+        setDuplicateArrivals((prev) => prev.filter((arrival) => !ids.has(arrival.participantId)));
+        setDuplicateCounters((prev) => {
+          const next = { ...prev };
+          bibs.forEach((bib) => {
+            delete next[bib];
+          });
+          return next;
+        });
+      }
+      toast({
+        title: "Cronómetro reseteado",
+        description: `Se limpió el grupo ${group.label}.`,
+      });
+    } catch (error) {
+      console.error(error);
+      toast({ variant: "destructive", title: "Error", description: "No se pudo resetear el cronómetro." });
+    } finally {
+      setStartingGroupKey(null);
+    }
+  };
+
   const handleManualCapture = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!manualBib.trim()) return;
@@ -282,6 +482,7 @@ export function TimingDashboard({
         const displayBib = `${bib}${suffix}`;
         const duplicateEntry: ArrivalEntry = {
           id: `${participant.id}-dup-${finishTime}`,
+          participantId: participant.id,
           bibNumber: participant.bibNumber,
           displayBib,
           name: participant.name,
@@ -314,6 +515,96 @@ export function TimingDashboard({
     } finally {
       setIsSavingManual(false);
     }
+  };
+
+  const exportGeneral = (format: "xlsx" | "pdf") => {
+    if (finishers.length === 0) {
+      toast({ title: "Sin datos", description: "Todavía no hay llegadas para exportar." });
+      return;
+    }
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const rows = finishers.map((arrival, index) => {
+      const participant = participantMapById[arrival.participantId];
+      const categoryLabel = arrival.categoryId ? categoriesMap[arrival.categoryId] || "Sin categoría" : "Sin categoría";
+      const elapsed = formatElapsedTime(arrival.finishTime - arrival.startTime);
+      return {
+        "Posición": index + 1,
+        Dorsal: arrival.displayBib,
+        Nombre: participant?.name ?? arrival.name,
+        Apellido: participant?.surname ?? arrival.surname,
+        DNI: participant?.dni ?? "",
+        Género: participant ? genderLabels[participant.gender] : "",
+        Distancia: arrival.distance,
+        Categoría: categoryLabel,
+        Ciudad: participant?.city ?? "",
+        Provincia: participant?.province ?? "",
+        País: participant?.country ?? "",
+        "Categoría especial": participant?.isSpecial ? "Sí" : "No",
+        "Hora de inicio": participant?.startTime ? new Date(participant.startTime).toLocaleString() : "",
+        "Hora de llegada": new Date(arrival.finishTime).toLocaleString(),
+        Tiempo: elapsed,
+      };
+    });
+
+    if (format === "xlsx") {
+      const workbook = XLSX.utils.book_new();
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      XLSX.utils.book_append_sheet(workbook, worksheet, "General");
+      XLSX.writeFile(workbook, `llegadas_general_${timestamp}.xlsx`);
+      return;
+    }
+
+    const header = "Posición | Dorsal | Nombre completo | Categoría | Distancia | Tiempo";
+    const lines = [header, "-".repeat(header.length)];
+    rows.forEach((row) => {
+      lines.push(
+        `${row["Posición"]} | ${row.Dorsal} | ${row.Nombre} ${row.Apellido} | ${row.Categoría} | ${row.Distancia} | ${row.Tiempo}`
+      );
+    });
+    const pdf = buildPdfFromLines("Llegadas generales", lines);
+    downloadBlob(pdf, `llegadas_general_${timestamp}.pdf`);
+  };
+
+  const exportByCategory = (format: "xlsx" | "pdf") => {
+    if (categoryArrivals.length === 0) {
+      toast({ title: "Sin datos", description: "Aún no hay categorías con llegadas." });
+      return;
+    }
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    if (format === "xlsx") {
+      const workbook = XLSX.utils.book_new();
+      categoryArrivals.forEach((category) => {
+        const sheetRows = category.members.map((arrival, index) => ({
+          "Posición": index + 1,
+          Dorsal: arrival.displayBib,
+          Nombre: `${arrival.name} ${arrival.surname}`,
+          Distancia: arrival.distance,
+          Tiempo: formatElapsedTime(arrival.finishTime - arrival.startTime),
+        }));
+        const worksheet = XLSX.utils.json_to_sheet(
+          sheetRows.length > 0 ? sheetRows : [{ Aviso: "Sin llegadas registradas" }]
+        );
+        XLSX.utils.book_append_sheet(workbook, worksheet, sanitizeSheetName(category.label));
+      });
+      XLSX.writeFile(workbook, `clasificacion_categorias_${timestamp}.xlsx`);
+      return;
+    }
+
+    const lines: string[] = [];
+    categoryArrivals.forEach((category) => {
+      lines.push(category.label.toUpperCase());
+      lines.push("Posición | Dorsal | Nombre | Tiempo");
+      category.members.forEach((arrival, index) => {
+        lines.push(
+          `${index + 1} | ${arrival.displayBib} | ${arrival.name} ${arrival.surname} | ${formatElapsedTime(
+            arrival.finishTime - arrival.startTime
+          )}`
+        );
+      });
+      lines.push("");
+    });
+    const pdf = buildPdfFromLines("Clasificación por categoría", lines);
+    downloadBlob(pdf, `clasificacion_categorias_${timestamp}.pdf`);
   };
 
   return (
@@ -393,20 +684,22 @@ export function TimingDashboard({
               </div>
               {isAdmin && (
                 <Button
-                  onClick={() =>
-                    group.startTime && stoppedGroups[group.key]
-                      ? handleStartGroup(group)
-                      : group.startTime
-                      ? handleStopGroup(group)
-                      : handleStartGroup(group)
-                  }
+                  onClick={() => {
+                    if (!group.startTime) {
+                      handleStartGroup(group);
+                    } else if (stoppedGroups[group.key]) {
+                      handleResetGroup(group);
+                    } else {
+                      handleStopGroup(group);
+                    }
+                  }}
                   disabled={startingGroupKey === group.key || isLocked}
                   variant={
-                    group.startTime
-                      ? stoppedGroups[group.key]
-                        ? "default"
-                        : "outline"
-                      : "default"
+                    !group.startTime
+                      ? "default"
+                      : stoppedGroups[group.key]
+                      ? "destructive"
+                      : "outline"
                   }
                 >
                   {group.startTime
@@ -445,8 +738,22 @@ export function TimingDashboard({
 
       <Card>
         <CardHeader>
-          <CardTitle>Lista general de llegadas</CardTitle>
-          <CardDescription>Participantes ordenados por hora de arribo.</CardDescription>
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <CardTitle>Lista general de llegadas</CardTitle>
+              <CardDescription>Participantes ordenados por hora de arribo.</CardDescription>
+            </div>
+            {finishers.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={() => exportGeneral("xlsx")}>
+                  Exportar XLS
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => exportGeneral("pdf")}>
+                  Exportar PDF
+                </Button>
+              </div>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           {finishers.length === 0 ? (
@@ -492,8 +799,22 @@ export function TimingDashboard({
 
       <Card>
         <CardHeader>
-          <CardTitle>Clasificación en vivo por categoría</CardTitle>
-          <CardDescription>Se actualiza automáticamente con cada llegada registrada manualmente.</CardDescription>
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <CardTitle>Clasificación en vivo por categoría</CardTitle>
+              <CardDescription>Se actualiza automáticamente con cada llegada registrada manualmente.</CardDescription>
+            </div>
+            {categoryArrivals.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={() => exportByCategory("xlsx")}>
+                  XLS por categoría
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => exportByCategory("pdf")}>
+                  PDF por categoría
+                </Button>
+              </div>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           {categoryArrivals.length === 0 ? (
