@@ -39,3 +39,10 @@ export function generateChipNumber(bibNumber: string): string {
   const paddedBib = String(bibNumber).padStart(5, '0');
   return `LT${paddedBib}`;
 }
+
+export function deriveBirthDateFromAge(age: number, referenceDate: Date = new Date()): string {
+  const base = new Date(referenceDate);
+  base.setHours(0, 0, 0, 0);
+  base.setFullYear(base.getFullYear() - age);
+  return base.toISOString().split('T')[0];
+}
