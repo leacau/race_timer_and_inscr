@@ -27,6 +27,19 @@ type TimingGroup = {
   actionGroupId: string | null;
 };
 
+type ArrivalEntry = {
+  id: string;
+  bibNumber: string;
+  displayBib: string;
+  name: string;
+  surname: string;
+  categoryId: string | null;
+  distance: Participant["distance"];
+  startTime: number;
+  finishTime: number;
+  isDuplicate?: boolean;
+};
+
 const modeOptions: { value: TimingMode; label: string }[] = [
   { value: "general", label: "Largada única" },
   { value: "distance", label: "Por distancia" },
@@ -54,6 +67,8 @@ export function TimingDashboard({
   const [stoppedGroups, setStoppedGroups] = useState<
     Record<string, { pausedAt: number; referenceStart: number }>
   >({});
+  const [duplicateArrivals, setDuplicateArrivals] = useState<ArrivalEntry[]>([]);
+  const [duplicateCounters, setDuplicateCounters] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 500);
@@ -154,14 +169,28 @@ export function TimingDashboard({
     return lookup;
   }, [groups]);
 
-  const finishers = useMemo(() => {
+  const finisherEntries = useMemo<ArrivalEntry[]>(() => {
     return participants
       .filter((participant) => participant.finishTime && participant.startTime)
-      .sort((a, b) => (a.finishTime! - b.finishTime!));
+      .map((participant) => ({
+        id: participant.id,
+        bibNumber: participant.bibNumber,
+        displayBib: participant.bibNumber,
+        name: participant.name,
+        surname: participant.surname,
+        categoryId: participant.categoryId ?? null,
+        distance: participant.distance,
+        startTime: participant.startTime!,
+        finishTime: participant.finishTime!,
+      }));
   }, [participants]);
 
+  const finishers = useMemo(() => {
+    return [...finisherEntries, ...duplicateArrivals].sort((a, b) => a.finishTime - b.finishTime);
+  }, [finisherEntries, duplicateArrivals]);
+
   const categoryArrivals = useMemo(() => {
-    const map = new Map<string, { label: string; members: Participant[] }>();
+    const map = new Map<string, { label: string; members: ArrivalEntry[] }>();
     finishers.forEach((participant) => {
       const categoryId = participant.categoryId ?? "__sin_categoria__";
       const label = participant.categoryId ? categoriesMap[participant.categoryId] ?? "Sin categoría" : "Sin categoría";
@@ -227,6 +256,7 @@ export function TimingDashboard({
     const participant = participants.find((p) => p.bibNumber === bib);
     if (!participant) {
       toast({ variant: "destructive", title: "Dorsal no encontrado", description: `No existe el dorsal ${bib}.` });
+      setManualBib("");
       return;
     }
 
@@ -244,7 +274,35 @@ export function TimingDashboard({
     setIsSavingManual(true);
     try {
       const finishTime = Date.now();
-      await updateParticipantTime(participant.id, startTime, finishTime);
+      const effectiveStartTime = participant.startTime ?? startTime;
+
+      if (participant.finishTime) {
+        const nextIndex = duplicateCounters[bib] ?? 0;
+        const suffix = nextIndex === 0 ? "bis" : `bis${nextIndex}`;
+        const displayBib = `${bib}${suffix}`;
+        const duplicateEntry: ArrivalEntry = {
+          id: `${participant.id}-dup-${finishTime}`,
+          bibNumber: participant.bibNumber,
+          displayBib,
+          name: participant.name,
+          surname: participant.surname,
+          categoryId: participant.categoryId ?? null,
+          distance: participant.distance,
+          startTime: effectiveStartTime,
+          finishTime,
+          isDuplicate: true,
+        };
+        setDuplicateArrivals((prev) => [...prev, duplicateEntry]);
+        setDuplicateCounters((prev) => ({ ...prev, [bib]: nextIndex + 1 }));
+        toast({
+          title: "Tiempo duplicado registrado",
+          description: `El dorsal ${bib} ya tenía un registro. Se agregó como ${displayBib}.`,
+        });
+        setManualBib("");
+        return;
+      }
+
+      await updateParticipantTime(participant.id, effectiveStartTime, finishTime);
       toast({
         title: "Tiempo registrado",
         description: `Se registró la llegada del dorsal ${bib}.`,
@@ -353,9 +411,9 @@ export function TimingDashboard({
                 >
                   {group.startTime
                     ? stoppedGroups[group.key]
-                      ? "Reiniciar"
+                      ? "Resetear"
                       : "Detener"
-                    : "Inicio"}
+                    : "Iniciar"}
                 </Button>
               )}
             </CardContent>
@@ -407,21 +465,21 @@ export function TimingDashboard({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {finishers.map((participant, index) => (
-                    <TableRow key={participant.id}>
+                  {finishers.map((arrival, index) => (
+                    <TableRow key={arrival.id}>
                       <TableCell className="font-semibold">{index + 1}</TableCell>
-                      <TableCell className="font-semibold">{participant.bibNumber}</TableCell>
-                      <TableCell>{`${participant.name} ${participant.surname}`}</TableCell>
+                      <TableCell className="font-semibold">{arrival.displayBib}</TableCell>
+                      <TableCell>{`${arrival.name} ${arrival.surname}`}</TableCell>
                       <TableCell className="hidden md:table-cell">
-                        {participant.categoryId ? (
-                          <Badge variant="secondary">{categoriesMap[participant.categoryId] || "Sin categoría"}</Badge>
+                        {arrival.categoryId ? (
+                          <Badge variant="secondary">{categoriesMap[arrival.categoryId] || "Sin categoría"}</Badge>
                         ) : (
                           <Badge variant="outline">Sin categoría</Badge>
                         )}
                       </TableCell>
-                      <TableCell>{participant.distance}</TableCell>
+                      <TableCell>{arrival.distance}</TableCell>
                       <TableCell className="font-mono">
-                        {formatElapsedTime((participant.finishTime ?? 0) - (participant.startTime ?? 0))}
+                        {formatElapsedTime(arrival.finishTime - arrival.startTime)}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -459,13 +517,13 @@ export function TimingDashboard({
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {category.members.map((participant, index) => (
-                          <TableRow key={participant.id}>
+                        {category.members.map((arrival, index) => (
+                          <TableRow key={arrival.id}>
                             <TableCell className="font-semibold">{index + 1}</TableCell>
-                            <TableCell className="font-semibold">{participant.bibNumber}</TableCell>
-                            <TableCell>{`${participant.name} ${participant.surname}`}</TableCell>
+                            <TableCell className="font-semibold">{arrival.displayBib}</TableCell>
+                            <TableCell>{`${arrival.name} ${arrival.surname}`}</TableCell>
                             <TableCell className="font-mono">
-                              {formatElapsedTime((participant.finishTime ?? 0) - (participant.startTime ?? 0))}
+                              {formatElapsedTime(arrival.finishTime - arrival.startTime)}
                             </TableCell>
                           </TableRow>
                         ))}
