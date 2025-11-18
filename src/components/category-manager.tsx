@@ -31,6 +31,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -71,25 +72,32 @@ const categorySchema = z.object({
 });
 
 const bulkCategorySchema = z.object({
-  ageRanges: z.array(z.object({
-    min: z.coerce.number().int().min(0, "La edad mínima debe ser al menos 0."),
-    max: z.coerce.number().int().min(0, "La edad máxima debe ser al menos 0."),
-  })).min(1, "Debe definir al menos un rango de edad.").refine(
-    (ranges) => {
-      const sortedRanges = [...ranges].sort((a, b) => a.min - b.min);
-      for (let i = 0; i < sortedRanges.length - 1; i++) {
-        if (sortedRanges[i].max >= sortedRanges[i + 1].min) {
-          return false; // Overlap detected
+  ageRanges: z
+    .array(
+      z.object({
+        min: z.coerce.number().int().min(0, "La edad mínima debe ser al menos 0."),
+        max: z.coerce.number().int().min(0, "La edad máxima debe ser al menos 0."),
+      })
+    )
+    .min(1, "Debe definir al menos un rango de edad.")
+    .refine(
+      (ranges) => {
+        const sortedRanges = [...ranges].sort((a, b) => a.min - b.min);
+        for (let i = 0; i < sortedRanges.length - 1; i++) {
+          if (sortedRanges[i].max >= sortedRanges[i + 1].min) {
+            return false;
+          }
         }
+        return true;
+      },
+      {
+        message: "Los rangos de edad no deben solaparse.",
       }
-      return true;
-    },
-    {
-      message: "Los rangos de edad no deben solaparse.",
-    }
-  ),
+    ),
   distances: z.array(z.string()).min(1, "Debe seleccionar al menos una distancia."),
   genders: z.array(z.string()),
+  nameTemplate: z.string().min(1, "Define una plantilla para los nombres."),
+  genderFormat: z.enum(["long", "short"]),
 });
 
 
@@ -120,10 +128,12 @@ export function CategoryManager({ initialCategories }: { initialCategories: Cate
   const bulkForm = useForm<BulkCategoryFormValues>({
     resolver: zodResolver(bulkCategorySchema),
     defaultValues: {
-      ageRanges: [{min: 18, max: 29}],
+      ageRanges: [{ min: 18, max: 29 }],
       distances: [],
       genders: [],
-    }
+      nameTemplate: "[[distancia]]K [[genero]] DE [[edad min]] A [[edad max]] AÑOS",
+      genderFormat: "long",
+    },
   });
 
   const { fields, append, remove } = useFieldArray({
@@ -150,9 +160,11 @@ export function CategoryManager({ initialCategories }: { initialCategories: Cate
   
   const handleOpenBulkDialog = () => {
     bulkForm.reset({
-      ageRanges: [{min: 18, max: 29}],
+      ageRanges: [{ min: 18, max: 29 }],
       distances: [],
       genders: [],
+      nameTemplate: "[[distancia]]K [[genero]] DE [[edad min]] A [[edad max]] AÑOS",
+      genderFormat: "long",
     });
     setOpenBulk(true);
   }
@@ -554,6 +566,46 @@ export function CategoryManager({ initialCategories }: { initialCategories: Cate
                             <FormMessage />
                         </FormItem>
                     )}
+                />
+
+                <FormField
+                  control={bulkForm.control}
+                  name="genderFormat"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Formato de género</FormLabel>
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Elegir formato" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="long">Largo (Masculino / Femenino)</SelectItem>
+                          <SelectItem value="short">Corto (M / F)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={bulkForm.control}
+                  name="nameTemplate"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Plantilla para el nombre</FormLabel>
+                      <FormControl>
+                        <Textarea rows={3} {...field} />
+                      </FormControl>
+                      <p className="text-xs text-muted-foreground">
+                        Usa marcadores como [[distancia]], [[genero]], [[genero_corto]], [[genero_largo]], [[edad min]] y [[edad max]]
+                        para construir el nombre automáticamente.
+                      </p>
+                      <FormMessage />
+                    </FormItem>
+                  )}
                 />
 
                 <DialogFooter>
