@@ -21,6 +21,13 @@ export async function getParticipants(raceId?: string | null): Promise<Participa
     const constraints = raceId ? [where("raceId", "==", raceId)] : [];
     const q = constraints.length ? query(participantsCol, ...constraints) : query(participantsCol);
     const participantSnapshot = await getDocs(q);
+    const toComparable = (value: string | null): string | number => {
+        if (!value) return Number.MAX_SAFE_INTEGER;
+        const numeric = parseInt(value.replace(/[^0-9]/g, ""), 10);
+        if (!Number.isNaN(numeric)) return numeric;
+        return value.toLowerCase();
+    };
+
     const participantList = participantSnapshot.docs
         .map(doc => {
             const data = doc.data() as ParticipantFirestoreData;
@@ -31,9 +38,12 @@ export async function getParticipants(raceId?: string | null): Promise<Participa
             } satisfies Participant;
         })
         .sort((a, b) => {
-            const aBib = a.bibNumber ?? Number.MAX_SAFE_INTEGER;
-            const bBib = b.bibNumber ?? Number.MAX_SAFE_INTEGER;
-            return aBib - bBib;
+            const aBib = toComparable(a.bibNumber ?? null);
+            const bBib = toComparable(b.bibNumber ?? null);
+            if (typeof aBib === "number" && typeof bBib === "number") {
+                return aBib - bBib;
+            }
+            return String(aBib).localeCompare(String(bBib), undefined, { numeric: true, sensitivity: "base" });
         });
     return participantList;
 }

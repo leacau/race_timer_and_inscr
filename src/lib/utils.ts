@@ -34,10 +34,10 @@ export function formatElapsedTime(ms: number): string {
   return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(2, '0')}`;
 }
 
-export function generateChipNumber(bibNumber: string): string {
+export function generateChipNumber(bibNumber?: string | null): string {
   if (!bibNumber) return "";
   const paddedBib = String(bibNumber).padStart(5, '0');
-  return `LT${paddedBib}`;
+  return `LP${paddedBib}`;
 }
 
 export function deriveBirthDateFromAge(age: number, referenceDate: Date = new Date()): string {

@@ -46,7 +46,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { MoreVertical, Edit, Trash2, Plus, Upload, Sparkles } from "lucide-react";
+import { Hash, MoreVertical, Edit, Trash2, Plus, Upload, Sparkles } from "lucide-react";
 import type { Participant, Category, ParticipantInput, Race } from "@/lib/types";
 import { calculateAge, deriveBirthDateFromAge } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -61,6 +61,7 @@ import {
   importParticipants,
   bulkDeleteParticipants,
   assignCategoriesToParticipants,
+  bulkAssignBibNumbers,
 } from "@/lib/actions";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -92,7 +93,7 @@ type ImportState = {
 };
 
 const systemFields = [
-  { key: "bibNumber", label: "Dorsal", required: true },
+  { key: "bibNumber", label: "Dorsal", required: false },
   { key: "name", label: "Nombre", required: true },
   { key: "surname", label: "Apellido", required: true },
   { key: "dni", label: "DNI/ID", required: true },
@@ -123,7 +124,13 @@ const isPairedField = (key: string): key is (typeof pairedFields)[number] =>
 
 const importParticipantSchema = z
   .object({
-    bibNumber: z.string().min(1, { message: "El dorsal es requerido." }),
+    bibNumber: z
+      .string()
+      .optional()
+      .transform((value) => {
+        const trimmed = value?.toString().trim();
+        return trimmed && trimmed.length > 0 ? trimmed : undefined;
+      }),
     name: z.string().min(1, { message: "El nombre es requerido." }),
     surname: z.string().min(1, { message: "El apellido es requerido." }),
     dni: z.string().min(1, { message: "El DNI/ID es requerido." }),
@@ -196,6 +203,13 @@ export function CompetitorsManager({
     distance: "5k",
   });
   const [isAssigning, setIsAssigning] = useState(false);
+  const [isBibDialogOpen, setIsBibDialogOpen] = useState(false);
+  const [bibStart, setBibStart] = useState("");
+  const [bibEnd, setBibEnd] = useState("");
+  const [bibDistance, setBibDistance] = useState<Participant["distance"] | "all">("all");
+  const [bibGender, setBibGender] = useState<Participant["gender"] | "any">("any");
+  const [bibTarget, setBibTarget] = useState<"missing" | "selected">("missing");
+  const [isAssigningBibs, setIsAssigningBibs] = useState(false);
 
   const categoryMap = useMemo(() => {
     return categories.reduce((acc, category) => {
@@ -254,6 +268,16 @@ export function CompetitorsManager({
     }
   }, [isAssignmentDialogOpen]);
 
+  useEffect(() => {
+    if (!isBibDialogOpen) {
+      setBibStart("");
+      setBibEnd("");
+      setBibDistance("all");
+      setBibGender("any");
+      setBibTarget("missing");
+    }
+  }, [isBibDialogOpen]);
+
   const form = useForm<ParticipantFormValues>({
     resolver: zodResolver(participantSchema),
     defaultValues: {
@@ -276,6 +300,7 @@ export function CompetitorsManager({
       setEditingParticipant(participant);
       form.reset({
         ...participant,
+        bibNumber: participant.bibNumber ?? "",
         birthDate: participant.birthDate ? new Date(participant.birthDate).toISOString().split("T")[0] : "",
         isSpecial: participant.isSpecial,
       });
@@ -440,6 +465,63 @@ export function CompetitorsManager({
       toast({ variant: "destructive", title: "Error", description: "No se pudieron actualizar las categorías." });
     } finally {
       setIsAssigning(false);
+    }
+  };
+
+  const handleBibAssignment = async () => {
+    if (!raceId) {
+      toast({ variant: "destructive", title: "Selecciona una carrera", description: "Debes elegir una carrera para asignar dorsales." });
+      return;
+    }
+
+    const start = parseInt(bibStart, 10);
+    const end = parseInt(bibEnd, 10);
+    if (Number.isNaN(start) || Number.isNaN(end)) {
+      toast({ variant: "destructive", title: "Rango inválido", description: "Ingresa un rango de dorsales válido." });
+      return;
+    }
+
+    if (bibTarget === "selected" && selectedCount === 0) {
+      toast({ variant: "destructive", title: "Selecciona participantes", description: "Elige a quién asignar los dorsales." });
+      return;
+    }
+
+    setIsAssigningBibs(true);
+    try {
+      const result = await bulkAssignBibNumbers({
+        raceId,
+        startBib: start,
+        endBib: end,
+        distance: bibDistance === "all" ? undefined : bibDistance,
+        gender: bibGender === "any" ? undefined : bibGender,
+        targetIds: bibTarget === "selected" ? Array.from(selectedParticipants) : undefined,
+      });
+
+      if (result.assigned === 0) {
+        toast({
+          variant: "destructive",
+          title: "Sin dorsales asignados",
+          description: "No se encontraron competidores sin dorsal en el filtro seleccionado.",
+        });
+      } else {
+        const remaining = result.total - result.assigned;
+        toast({
+          title: `Asignados ${result.assigned} dorsales`,
+          description:
+            remaining > 0
+              ? `Faltaron ${remaining} competidores por falta de números en el rango.`
+              : "Se asignaron todos los dorsales disponibles al filtro indicado.",
+        });
+        setIsBibDialogOpen(false);
+        if (bibTarget === "selected") {
+          setSelectedParticipants(new Set());
+        }
+      }
+    } catch (error) {
+      console.error(error);
+      toast({ variant: "destructive", title: "Error", description: "No se pudieron asignar los dorsales." });
+    } finally {
+      setIsAssigningBibs(false);
     }
   };
 
@@ -675,7 +757,7 @@ export function CompetitorsManager({
             <Checkbox checked={isSelected} onCheckedChange={(checked) => toggleSelection(p.id)} aria-label="Seleccionar participante" />
           </TableCell>
         )}
-        <TableCell className="font-medium">{p.bibNumber}</TableCell>
+        <TableCell className="font-medium">{p.bibNumber || "—"}</TableCell>
         <TableCell className="font-medium">{`${p.name} ${p.surname}`}</TableCell>
         <TableCell className="hidden md:table-cell">{age ?? "-"}</TableCell>
         <TableCell className="hidden md:table-cell">{p.gender === "Male" ? "Masculino" : p.gender === "Female" ? "Femenino" : "Otro"}</TableCell>
@@ -743,7 +825,7 @@ export function CompetitorsManager({
             </div>
           )}
           <div>
-            <p className="text-sm font-semibold text-primary">#{p.bibNumber}</p>
+            <p className="text-sm font-semibold text-primary">{p.bibNumber ? `#${p.bibNumber}` : "Sin dorsal"}</p>
             <h3 className="font-semibold">{`${p.name} ${p.surname}`}</h3>
             <p className="text-sm text-muted-foreground">
               {age ?? "-"} años | {p.distance} | {p.gender === "Male" ? "Masculino" : p.gender === "Female" ? "Femenino" : "Otro"}
@@ -786,6 +868,13 @@ export function CompetitorsManager({
               className="hidden"
               accept=".xlsx, .xls, .csv"
             />
+            <Button
+              variant="outline"
+              onClick={() => setIsBibDialogOpen(true)}
+              disabled={participants.length === 0}
+            >
+              <Hash className="mr-2 h-4 w-4" /> Asignar dorsales
+            </Button>
             <Button
               variant="secondary"
               onClick={() => setIsAssignmentDialogOpen(true)}
@@ -1164,6 +1253,86 @@ export function CompetitorsManager({
             </DialogClose>
             <Button onClick={handleAssignmentSubmit} disabled={isAssigning}>
               Guardar cambios
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isBibDialogOpen} onOpenChange={setIsBibDialogOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Asignar dorsales automáticamente</DialogTitle>
+            <DialogDescription>
+              Aplica un rango de dorsales a competidores sin número, filtrando por distancia, género o selección manual.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Dorsal desde</Label>
+              <Input value={bibStart} onChange={(event) => setBibStart(event.target.value)} inputMode="numeric" />
+            </div>
+            <div className="space-y-2">
+              <Label>Dorsal hasta</Label>
+              <Input value={bibEnd} onChange={(event) => setBibEnd(event.target.value)} inputMode="numeric" />
+            </div>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Distancia</Label>
+              <Select value={bibDistance} onValueChange={(value) => setBibDistance(value as typeof bibDistance)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecciona distancia" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas</SelectItem>
+                  <SelectItem value="5k">5k</SelectItem>
+                  <SelectItem value="10k">10k</SelectItem>
+                  <SelectItem value="21k">21k</SelectItem>
+                  <SelectItem value="42k">42k</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Género</Label>
+              <Select value={bibGender} onValueChange={(value) => setBibGender(value as typeof bibGender)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecciona género" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="any">Cualquiera</SelectItem>
+                  <SelectItem value="Male">Masculino</SelectItem>
+                  <SelectItem value="Female">Femenino</SelectItem>
+                  <SelectItem value="Other">Otro</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Destino</Label>
+            <RadioGroup value={bibTarget} onValueChange={(value) => setBibTarget(value as typeof bibTarget)}>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="missing" id="bib-missing" />
+                <Label htmlFor="bib-missing" className="font-normal">
+                  Competidores sin dorsal que cumplan el filtro ({participants.filter((p) => !p.bibNumber).length})
+                </Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="selected" id="bib-selected" />
+                <Label htmlFor="bib-selected" className="font-normal">
+                  Solo seleccionados ({selectedCount})
+                </Label>
+              </div>
+            </RadioGroup>
+            <p className="text-xs text-muted-foreground">Solo se actualizarán quienes no tengan dorsal asignado.</p>
+          </div>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="secondary">
+                Cancelar
+              </Button>
+            </DialogClose>
+            <Button onClick={handleBibAssignment} disabled={isAssigningBibs}>
+              Asignar dorsales
             </Button>
           </DialogFooter>
         </DialogContent>

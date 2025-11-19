@@ -441,8 +441,8 @@ export function TimingDashboard({
       .map((participant) => ({
         id: participant.id,
         participantId: participant.id,
-        bibNumber: participant.bibNumber,
-        displayBib: participant.bibNumber,
+        bibNumber: participant.bibNumber ?? "",
+        displayBib: participant.bibNumber ?? "Sin dorsal",
         name: participant.name,
         surname: participant.surname,
         categoryId: participant.categoryId ?? null,
@@ -567,7 +567,9 @@ export function TimingDashboard({
         setDuplicateCounters((prev) => {
           const next = { ...prev };
           bibs.forEach((bib) => {
-            delete next[bib];
+            if (bib) {
+              delete next[bib];
+            }
           });
           return next;
         });
@@ -589,7 +591,7 @@ export function TimingDashboard({
     if (!manualBib.trim()) return;
     const bib = manualBib.trim();
     const participant = participants.find((p) => p.bibNumber === bib);
-    if (!participant) {
+    if (!participant || !participant.bibNumber) {
       toast({ variant: "destructive", title: "Dorsal no encontrado", description: `No existe el dorsal ${bib}.` });
       setManualBib("");
       return;

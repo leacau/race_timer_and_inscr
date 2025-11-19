@@ -37,11 +37,13 @@ export async function addParticipant(
 ) {
   const categories = await db.getCategories(raceId);
   const categoryId = assignCategory(participantData, categories, raceDate, ageCalculationMethod);
-  const chipNumber = generateChipNumber(participantData.bibNumber);
+  const bibNumber = participantData.bibNumber?.toString().trim() || null;
+  const chipNumber = bibNumber ? generateChipNumber(bibNumber) : "";
 
   const participantToSave: ParticipantFirestoreData = {
     raceId,
     ...participantData,
+    bibNumber,
     city: participantData.city || null,
     province: participantData.province || null,
     country: participantData.country || null,
@@ -66,9 +68,13 @@ export async function updateParticipant(
 ) {
   const categories = await db.getCategories(raceId);
   const categoryId = assignCategory(participantData, categories, raceDate, ageCalculationMethod);
+  const bibNumber = participantData.bibNumber?.toString().trim() || null;
+  const chipNumber = bibNumber ? generateChipNumber(bibNumber) : "";
 
   const dataToUpdate: Partial<ParticipantFirestoreData> = {
     ...participantData,
+    bibNumber,
+    chipNumber,
     isSpecial: Boolean(participantData.isSpecial),
     categoryId,
   };
@@ -168,11 +174,12 @@ export async function importParticipants(
 
   const participantsToCreate = participants.map((p) => {
     const categoryId = assignCategory(p, categories, raceDate, ageCalculationMethod);
-    const chipNumber = generateChipNumber(p.bibNumber);
+    const bibNumber = p.bibNumber?.toString().trim() || null;
+    const chipNumber = bibNumber ? generateChipNumber(bibNumber) : "";
 
     const data: ParticipantFirestoreData = {
         raceId,
-        bibNumber: p.bibNumber,
+        bibNumber,
         name: p.name,
         surname: p.surname,
         dni: p.dni,
@@ -217,7 +224,8 @@ const compareComparable = (a: string | number, b: string | number) => {
   return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
 };
 
-const isBibWithinRange = (bib: string, fromBib: string, toBib: string) => {
+const isBibWithinRange = (bib: string | null, fromBib: string, toBib: string) => {
+  if (!bib) return false;
   let min = toComparableBib(fromBib);
   let max = toComparableBib(toBib);
   if (compareComparable(min, max) > 0) {
@@ -240,6 +248,62 @@ const resolveTargetParticipants = (
   }
   return participants.filter((p) => isBibWithinRange(p.bibNumber, target.fromBib, target.toBib));
 };
+
+type BibAssignmentFilters = {
+  raceId: string;
+  startBib: number;
+  endBib: number;
+  distance?: Participant["distance"];
+  gender?: Participant["gender"];
+  targetIds?: string[];
+};
+
+export async function bulkAssignBibNumbers(options: BibAssignmentFilters) {
+  const participants = await db.getParticipants(options.raceId);
+  const { distance, gender, targetIds } = options;
+  const selectedIds = new Set(targetIds ?? []);
+
+  const basePool = targetIds?.length
+    ? participants.filter((p) => selectedIds.has(p.id))
+    : participants.filter((p) => {
+        if (distance && p.distance !== distance) return false;
+        if (gender && p.gender !== gender) return false;
+        return true;
+      });
+
+  const targets = basePool.filter((p) => !p.bibNumber);
+  if (targets.length === 0) {
+    return { assigned: 0, total: 0, skipped: basePool.length };
+  }
+
+  const sortedTargets = [...targets].sort((a, b) => {
+    const bySurname = a.surname.localeCompare(b.surname, "es", { sensitivity: "base" });
+    if (bySurname !== 0) return bySurname;
+    return a.name.localeCompare(b.name, "es", { sensitivity: "base" });
+  });
+
+  const min = Math.min(options.startBib, options.endBib);
+  const max = Math.max(options.startBib, options.endBib);
+  const availableSlots = max - min + 1;
+  const assignments = Math.min(availableSlots, sortedTargets.length);
+
+  const updates: { id: string; data: Partial<ParticipantFirestoreData> }[] = [];
+  for (let i = 0; i < assignments; i++) {
+    const bibValue = (min + i).toString();
+    updates.push({
+      id: sortedTargets[i].id,
+      data: { bibNumber: bibValue, chipNumber: generateChipNumber(bibValue) },
+    });
+  }
+
+  if (updates.length > 0) {
+    await db.bulkUpdateParticipants(updates);
+    revalidatePath("/");
+    revalidatePath("/competitors");
+  }
+
+  return { assigned: updates.length, total: targets.length, skipped: targets.length - updates.length };
+}
 
 export async function assignCategoriesToParticipants(
   options: CategoryAssignmentOptions,
@@ -456,7 +520,13 @@ export async function bulkAddCategories(
 }
 
 const serverImportParticipantSchema = z.object({
-  bibNumber: z.string().min(1),
+  bibNumber: z
+    .string()
+    .optional()
+    .transform((value) => {
+      const trimmed = value?.toString().trim();
+      return trimmed && trimmed.length > 0 ? trimmed : undefined;
+    }),
   name: z.string().min(1),
   surname: z.string().min(1),
   dni: z.string().min(1),

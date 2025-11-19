@@ -6,7 +6,7 @@ export type AgeCalculationMethod = 'raceDay' | 'endOfYear';
 export type Participant = {
   id: string;
   raceId: string;
-  bibNumber: string;
+  bibNumber: string | null;
   name: string;
   surname: string;
   dni: string;
@@ -16,7 +16,7 @@ export type Participant = {
   categoryId: string | null;
   startTime: number | null;
   finishTime: number | null;
-  chipNumber: string;
+  chipNumber: string | null;
   city: string | null;
   province: string | null;
   country: string | null;
@@ -25,7 +25,7 @@ export type Participant = {
 
 // Tipo para el formulario del cliente y la creación
 export type ParticipantInput = {
-  bibNumber: string;
+  bibNumber?: string | null;
   name: string;
   surname: string;
   dni: string;
