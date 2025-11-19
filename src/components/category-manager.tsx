@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useContext } from "react";
+import { useState, useContext, useEffect } from "react";
 import { Plus, Edit, Trash2, MoreVertical, Sparkles } from "lucide-react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -11,6 +11,7 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  CardDescription,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,6 +32,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -44,7 +46,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { Category } from "@/lib/types";
+import type { Category, Race } from "@/lib/types";
 import { addCategory, updateCategory, deleteCategory, bulkAddCategories, bulkDeleteCategories } from "@/lib/actions";
 import { useToast } from "@/hooks/use-toast";
 import { AppContext } from "@/context/app-context";
@@ -59,10 +61,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
+} from "@/components/ui/alert-dialog";
+import Link from "next/link";
 
 const categorySchema = z.object({
   id: z.string().optional(),
+  raceId: z.string().min(1),
   name: z.string().min(1, "El nombre de la categoría es requerido"),
   minAge: z.coerce.number().int().min(0),
   maxAge: z.coerce.number().int().min(0),
@@ -71,25 +75,32 @@ const categorySchema = z.object({
 });
 
 const bulkCategorySchema = z.object({
-  ageRanges: z.array(z.object({
-    min: z.coerce.number().int().min(0, "La edad mínima debe ser al menos 0."),
-    max: z.coerce.number().int().min(0, "La edad máxima debe ser al menos 0."),
-  })).min(1, "Debe definir al menos un rango de edad.").refine(
-    (ranges) => {
-      const sortedRanges = [...ranges].sort((a, b) => a.min - b.min);
-      for (let i = 0; i < sortedRanges.length - 1; i++) {
-        if (sortedRanges[i].max >= sortedRanges[i + 1].min) {
-          return false; // Overlap detected
+  ageRanges: z
+    .array(
+      z.object({
+        min: z.coerce.number().int().min(0, "La edad mínima debe ser al menos 0."),
+        max: z.coerce.number().int().min(0, "La edad máxima debe ser al menos 0."),
+      })
+    )
+    .min(1, "Debe definir al menos un rango de edad.")
+    .refine(
+      (ranges) => {
+        const sortedRanges = [...ranges].sort((a, b) => a.min - b.min);
+        for (let i = 0; i < sortedRanges.length - 1; i++) {
+          if (sortedRanges[i].max >= sortedRanges[i + 1].min) {
+            return false;
+          }
         }
+        return true;
+      },
+      {
+        message: "Los rangos de edad no deben solaparse.",
       }
-      return true;
-    },
-    {
-      message: "Los rangos de edad no deben solaparse.",
-    }
-  ),
+    ),
   distances: z.array(z.string()).min(1, "Debe seleccionar al menos una distancia."),
   genders: z.array(z.string()),
+  nameTemplate: z.string().min(1, "Define una plantilla para los nombres."),
+  genderFormat: z.enum(["long", "short"]),
 });
 
 
@@ -97,7 +108,15 @@ type CategoryFormValues = z.infer<typeof categorySchema>;
 type BulkCategoryFormValues = z.infer<typeof bulkCategorySchema>;
 
 
-export function CategoryManager({ initialCategories }: { initialCategories: Category[] }) {
+export function CategoryManager({
+  initialCategories,
+  raceId,
+  activeRace,
+}: {
+  initialCategories: Category[];
+  raceId: string | null;
+  activeRace?: Race | null;
+}) {
   const { toast } = useToast();
   const { role } = useContext(AppContext);
   const [open, setOpen] = useState(false);
@@ -106,9 +125,26 @@ export function CategoryManager({ initialCategories }: { initialCategories: Cate
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [isSelectAll, setIsSelectAll] = useState(false);
 
+  if (!raceId) {
+    return (
+      <Card className="border-dashed">
+        <CardHeader>
+          <CardTitle>Selecciona una carrera</CardTitle>
+          <CardDescription>Define una carrera para crear o editar categorías.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button asChild>
+            <Link href="/races">Administrar carreras</Link>
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
   const form = useForm<CategoryFormValues>({
     resolver: zodResolver(categorySchema),
     defaultValues: {
+      raceId: raceId ?? "",
       name: "",
       minAge: 0,
       maxAge: 99,
@@ -117,13 +153,21 @@ export function CategoryManager({ initialCategories }: { initialCategories: Cate
     },
   });
 
+  useEffect(() => {
+    if (raceId) {
+      form.setValue("raceId", raceId);
+    }
+  }, [raceId, form]);
+
   const bulkForm = useForm<BulkCategoryFormValues>({
     resolver: zodResolver(bulkCategorySchema),
     defaultValues: {
-      ageRanges: [{min: 18, max: 29}],
+      ageRanges: [{ min: 18, max: 29 }],
       distances: [],
       genders: [],
-    }
+      nameTemplate: "[[distancia]]K [[genero]] DE [[edad min]] A [[edad max]] AÑOS",
+      genderFormat: "long",
+    },
   });
 
   const { fields, append, remove } = useFieldArray({
@@ -138,6 +182,7 @@ export function CategoryManager({ initialCategories }: { initialCategories: Cate
     } else {
       setEditingCategory(null);
       form.reset({
+        raceId: raceId ?? "",
         name: "",
         minAge: 0,
         maxAge: 99,
@@ -150,20 +195,27 @@ export function CategoryManager({ initialCategories }: { initialCategories: Cate
   
   const handleOpenBulkDialog = () => {
     bulkForm.reset({
-      ageRanges: [{min: 18, max: 29}],
+      ageRanges: [{ min: 18, max: 29 }],
       distances: [],
       genders: [],
+      nameTemplate: "[[distancia]]K [[genero]] DE [[edad min]] A [[edad max]] AÑOS",
+      genderFormat: "long",
     });
     setOpenBulk(true);
   }
 
   const onSubmit = async (values: CategoryFormValues) => {
     try {
+      if (!raceId) {
+        toast({ variant: "destructive", title: "Selecciona una carrera", description: "Debes elegir una carrera antes de guardar categorías." });
+        return;
+      }
+      const payload = { ...values, raceId };
       if (editingCategory) {
-        await updateCategory({ ...editingCategory, ...values });
+        await updateCategory(editingCategory.id, payload);
         toast({ title: "Categoría Actualizada", description: "La categoría ha sido actualizada correctamente." });
       } else {
-        await addCategory(values);
+        await addCategory(payload);
         toast({ title: "Categoría Añadida", description: "La nueva categoría ha sido añadida correctamente." });
       }
       setOpen(false);
@@ -178,7 +230,11 @@ export function CategoryManager({ initialCategories }: { initialCategories: Cate
   
   const onBulkSubmit = async (values: BulkCategoryFormValues) => {
     try {
-      await bulkAddCategories(values);
+      if (!raceId) {
+        toast({ variant: "destructive", title: "Selecciona una carrera", description: "Crea o elige una carrera antes de generar categorías." });
+        return;
+      }
+      await bulkAddCategories(values, raceId);
       toast({ title: "Categorías Creadas", description: "Las categorías han sido creadas masivamente." });
       setOpenBulk(false);
     } catch (error) {
@@ -188,7 +244,9 @@ export function CategoryManager({ initialCategories }: { initialCategories: Cate
         description: "No se pudieron crear las categorías.",
       });
     }
-  }
+  };
+
+  const raceName = activeRace?.name ?? "Carrera";
 
   const handleDelete = async (id: string) => {
     try {
@@ -243,6 +301,9 @@ export function CategoryManager({ initialCategories }: { initialCategories: Cate
 
   return (
     <>
+      <p className="mb-2 text-sm text-muted-foreground">
+        Gestionando categorías de <span className="font-semibold text-foreground">{raceName}</span>
+      </p>
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
         {isAdmin && selectedCategories.length > 0 ? (
           <div className="flex items-center gap-2">
@@ -554,6 +615,46 @@ export function CategoryManager({ initialCategories }: { initialCategories: Cate
                             <FormMessage />
                         </FormItem>
                     )}
+                />
+
+                <FormField
+                  control={bulkForm.control}
+                  name="genderFormat"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Formato de género</FormLabel>
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Elegir formato" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="long">Largo (Masculino / Femenino)</SelectItem>
+                          <SelectItem value="short">Corto (M / F)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={bulkForm.control}
+                  name="nameTemplate"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Plantilla para el nombre</FormLabel>
+                      <FormControl>
+                        <Textarea rows={3} {...field} />
+                      </FormControl>
+                      <p className="text-xs text-muted-foreground">
+                        Usa marcadores como [[distancia]], [[genero]], [[genero_corto]], [[genero_largo]], [[edad min]] y [[edad max]]
+                        para construir el nombre automáticamente.
+                      </p>
+                      <FormMessage />
+                    </FormItem>
+                  )}
                 />
 
                 <DialogFooter>

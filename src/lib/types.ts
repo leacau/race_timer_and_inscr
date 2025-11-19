@@ -5,6 +5,7 @@ export type AgeCalculationMethod = 'raceDay' | 'endOfYear';
 // Tipo de Participante como se lee de Firestore
 export type Participant = {
   id: string;
+  raceId: string;
   bibNumber: string;
   name: string;
   surname: string;
@@ -19,6 +20,7 @@ export type Participant = {
   city: string | null;
   province: string | null;
   country: string | null;
+  isSpecial: boolean;
 };
 
 // Tipo para el formulario del cliente y la creación
@@ -33,6 +35,7 @@ export type ParticipantInput = {
   city?: string;
   province?: string;
   country?: string;
+  isSpecial?: boolean;
 };
 
 // Tipo para escribir en Firestore, sin id de documento
@@ -40,6 +43,7 @@ export type ParticipantFirestoreData = Omit<Participant, 'id'>;
 
 export type Category = {
   id: string;
+  raceId: string;
   name: string;
   minAge: number;
   maxAge: number;
@@ -48,3 +52,11 @@ export type Category = {
 };
 
 export type CategoryInput = Omit<Category, 'id'>;
+
+export type Race = {
+  id: string;
+  name: string;
+  eventDate: string; // YYYY-MM-DD
+};
+
+export type RaceInput = Omit<Race, 'id'>;

@@ -12,21 +12,36 @@ import {
     query,
     orderBy,
     writeBatch,
-    getDoc
+    where,
 } from "firebase/firestore";
-import type { Participant, Category, CategoryInput, ParticipantFirestoreData } from "./types";
+import type { Participant, Category, CategoryInput, ParticipantFirestoreData, Race, RaceInput } from "./types";
 
-export async function getParticipants(): Promise<Participant[]> {
+export async function getParticipants(raceId?: string | null): Promise<Participant[]> {
     const participantsCol = collection(db, "participants");
-    const q = query(participantsCol, orderBy("bibNumber"));
+    const constraints = [orderBy("bibNumber")];
+    if (raceId) {
+        constraints.unshift(where("raceId", "==", raceId));
+    }
+    const q = query(participantsCol, ...constraints);
     const participantSnapshot = await getDocs(q);
-    const participantList = participantSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Participant));
+    const participantList = participantSnapshot.docs.map(doc => {
+        const data = doc.data() as ParticipantFirestoreData;
+        return {
+            id: doc.id,
+            ...data,
+            isSpecial: data.isSpecial ?? false,
+        } satisfies Participant;
+    });
     return participantList;
 }
 
-export async function getCategories(): Promise<Category[]> {
+export async function getCategories(raceId?: string | null): Promise<Category[]> {
     const categoriesCol = collection(db, "categories");
-    const q = query(categoriesCol, orderBy("name"));
+    const constraints = [orderBy("name")];
+    if (raceId) {
+        constraints.unshift(where("raceId", "==", raceId));
+    }
+    const q = query(categoriesCol, ...constraints);
     const categorySnapshot = await getDocs(q);
     const categoryList = categorySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Category));
     return categoryList;
@@ -49,6 +64,28 @@ export async function deleteParticipant(id: string): Promise<void> {
 export async function updateParticipantTime(id: string, startTime: number, finishTime: number): Promise<void> {
     const participantRef = doc(db, "participants", id);
     await updateDoc(participantRef, { startTime, finishTime });
+}
+
+export async function bulkDeleteParticipants(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    const batch = writeBatch(db);
+    ids.forEach(id => {
+        const docRef = doc(db, "participants", id);
+        batch.delete(docRef);
+    });
+    await batch.commit();
+}
+
+export async function bulkUpdateParticipants(
+    updates: { id: string; data: Partial<ParticipantFirestoreData> }[]
+): Promise<void> {
+    if (updates.length === 0) return;
+    const batch = writeBatch(db);
+    updates.forEach(({ id, data }) => {
+        const docRef = doc(db, "participants", id);
+        batch.update(docRef, data);
+    });
+    await batch.commit();
 }
 
 export async function addCategory(category: CategoryInput): Promise<string> {
@@ -89,4 +126,26 @@ export async function importParticipants(participants: ParticipantFirestoreData[
         }
         await batch.commit();
     }
+}
+
+export async function getRaces(): Promise<Race[]> {
+    const racesCol = collection(db, "races");
+    const q = query(racesCol, orderBy("eventDate", "desc"));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<Race, "id">) }));
+}
+
+export async function addRace(data: RaceInput): Promise<string> {
+    const docRef = await addDoc(collection(db, "races"), data);
+    return docRef.id;
+}
+
+export async function updateRace(id: string, data: RaceInput): Promise<void> {
+    const raceRef = doc(db, "races", id);
+    await updateDoc(raceRef, data);
+}
+
+export async function deleteRace(id: string): Promise<void> {
+    const raceRef = doc(db, "races", id);
+    await deleteDoc(raceRef);
 }

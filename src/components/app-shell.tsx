@@ -55,8 +55,10 @@ import {
 } from "./ui/select";
 
 const navItems = [
-  { href: "/", icon: Timer, label: "Cronómetro" },
+  { href: "/", icon: Timer, label: "Cronometraje" },
+  { href: "/competitors", icon: Users, label: "Competidores" },
   { href: "/categories", icon: LayoutGrid, label: "Categorías" },
+  { href: "/races", icon: CalendarIcon, label: "Carreras" },
 ];
 
 function AppHeader() {
@@ -64,8 +66,10 @@ function AppHeader() {
   const { isMobile } = useSidebar();
 
   const pageTitles: { [key: string]: string } = {
-    "/": "Cronómetro de Participantes",
+    "/": "Cronometraje",
+    "/competitors": "Gestión de Competidores",
     "/categories": "Administrar Categorías",
+    "/races": "Carreras",
   };
   const pathname = usePathname();
   const title = pageTitles[pathname] ?? "Panel";
