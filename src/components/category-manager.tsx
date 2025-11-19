@@ -220,10 +220,11 @@ export function CategoryManager({
       }
       setOpen(false);
     } catch (error) {
+      const description = error instanceof Error ? error.message : "No se pudo guardar la categoría.";
       toast({
         variant: "destructive",
         title: "Error",
-        description: "No se pudo guardar la categoría.",
+        description,
       });
     }
   };
@@ -238,10 +239,11 @@ export function CategoryManager({
       toast({ title: "Categorías Creadas", description: "Las categorías han sido creadas masivamente." });
       setOpenBulk(false);
     } catch (error) {
+      const description = error instanceof Error ? error.message : "No se pudieron crear las categorías.";
       toast({
         variant: "destructive",
         title: "Error",
-        description: "No se pudieron crear las categorías.",
+        description,
       });
     }
   };

@@ -34,8 +34,8 @@ export function formatElapsedTime(ms: number): string {
   return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(2, '0')}`;
 }
 
-export function generateChipNumber(bibNumber?: string | null): string {
-  if (!bibNumber) return "";
+export function generateChipNumber(bibNumber?: string | null): string | null {
+  if (!bibNumber) return null;
   const paddedBib = String(bibNumber).padStart(5, '0');
   return `LP${paddedBib}`;
 }

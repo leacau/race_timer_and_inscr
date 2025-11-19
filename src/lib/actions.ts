@@ -28,6 +28,64 @@ export type CategoryAssignmentOptions =
 
 export type TimingMode = 'general' | 'distance' | 'category';
 
+const hasAgeOverlap = (
+  a: { min: number; max: number },
+  b: { min: number; max: number }
+) => a.min <= b.max && b.min <= a.max;
+
+const gendersCompatible = (a: Category["gender"], b: Category["gender"]) =>
+  a === "Any" || b === "Any" || a === b;
+
+const ensureUniqueIdentifiers = (
+  existing: Participant[],
+  candidates: { id?: string; bibNumber?: string | null; chipNumber?: string | null; dni: string }[]
+) => {
+  const bibMap = new Map<string, string>();
+  const chipMap = new Map<string, string>();
+  const dniMap = new Map<string, string>();
+
+  const seedMaps = (items: typeof candidates, skipId?: string) => {
+    items.forEach((p) => {
+      if (skipId && p.id === skipId) return;
+      if (p.bibNumber) {
+        bibMap.set(p.bibNumber, p.id ?? "existing");
+      }
+      if (p.chipNumber) {
+        chipMap.set(p.chipNumber, p.id ?? "existing");
+      }
+      if (p.dni) {
+        dniMap.set(p.dni, p.id ?? "existing");
+      }
+    });
+  };
+
+  seedMaps(existing);
+
+  for (const candidate of candidates) {
+    if (candidate.bibNumber) {
+      const owner = bibMap.get(candidate.bibNumber);
+      if (owner && owner !== candidate.id) {
+        throw new Error(`El dorsal ${candidate.bibNumber} ya está asignado a otro participante.`);
+      }
+      bibMap.set(candidate.bibNumber, candidate.id ?? "new");
+    }
+    if (candidate.chipNumber) {
+      const owner = chipMap.get(candidate.chipNumber);
+      if (owner && owner !== candidate.id) {
+        throw new Error(`El chip ${candidate.chipNumber} ya está asignado a otro participante.`);
+      }
+      chipMap.set(candidate.chipNumber, candidate.id ?? "new");
+    }
+    if (candidate.dni) {
+      const owner = dniMap.get(candidate.dni);
+      if (owner && owner !== candidate.id) {
+        throw new Error(`El DNI ${candidate.dni} ya está registrado en la carrera.`);
+      }
+      dniMap.set(candidate.dni, candidate.id ?? "new");
+    }
+  }
+};
+
 // Participant Actions
 export async function addParticipant(
   participantData: ParticipantInput,
@@ -35,10 +93,15 @@ export async function addParticipant(
   ageCalculationMethod: AgeCalculationMethod,
   raceId: string
 ) {
+  const existing = await db.getParticipants(raceId);
   const categories = await db.getCategories(raceId);
   const categoryId = assignCategory(participantData, categories, raceDate, ageCalculationMethod);
   const bibNumber = participantData.bibNumber?.toString().trim() || null;
-  const chipNumber = bibNumber ? generateChipNumber(bibNumber) : "";
+  const chipNumber = generateChipNumber(bibNumber);
+
+  ensureUniqueIdentifiers(existing, [
+    { bibNumber, chipNumber, dni: participantData.dni },
+  ]);
 
   const participantToSave: ParticipantFirestoreData = {
     raceId,
@@ -66,10 +129,16 @@ export async function updateParticipant(
   ageCalculationMethod: AgeCalculationMethod,
   raceId: string
 ) {
+  const existing = await db.getParticipants(raceId);
   const categories = await db.getCategories(raceId);
   const categoryId = assignCategory(participantData, categories, raceDate, ageCalculationMethod);
   const bibNumber = participantData.bibNumber?.toString().trim() || null;
-  const chipNumber = bibNumber ? generateChipNumber(bibNumber) : "";
+  const chipNumber = generateChipNumber(bibNumber);
+
+  ensureUniqueIdentifiers(
+    existing.filter((p) => p.id !== id),
+    [{ id, bibNumber, chipNumber, dni: participantData.dni }]
+  );
 
   const dataToUpdate: Partial<ParticipantFirestoreData> = {
     ...participantData,
@@ -171,11 +240,12 @@ export async function importParticipants(
   raceId: string
 ) {
   const categories = await db.getCategories(raceId);
+  const existing = await db.getParticipants(raceId);
 
   const participantsToCreate = participants.map((p) => {
     const categoryId = assignCategory(p, categories, raceDate, ageCalculationMethod);
     const bibNumber = p.bibNumber?.toString().trim() || null;
-    const chipNumber = bibNumber ? generateChipNumber(bibNumber) : "";
+    const chipNumber = generateChipNumber(bibNumber);
 
     const data: ParticipantFirestoreData = {
         raceId,
@@ -201,6 +271,12 @@ export async function importParticipants(
   if (participantsToCreate.length === 0) {
     return { count: 0 };
   }
+
+  ensureUniqueIdentifiers(existing, participantsToCreate.map((p) => ({
+    bibNumber: p.bibNumber,
+    chipNumber: p.chipNumber,
+    dni: p.dni,
+  })));
 
   await db.importParticipants(participantsToCreate);
 
@@ -262,6 +338,7 @@ export async function bulkAssignBibNumbers(options: BibAssignmentFilters) {
   const participants = await db.getParticipants(options.raceId);
   const { distance, gender, targetIds } = options;
   const selectedIds = new Set(targetIds ?? []);
+  const usedBibs = new Set(participants.map((p) => p.bibNumber).filter(Boolean) as string[]);
 
   const basePool = targetIds?.length
     ? participants.filter((p) => selectedIds.has(p.id))
@@ -288,12 +365,19 @@ export async function bulkAssignBibNumbers(options: BibAssignmentFilters) {
   const assignments = Math.min(availableSlots, sortedTargets.length);
 
   const updates: { id: string; data: Partial<ParticipantFirestoreData> }[] = [];
-  for (let i = 0; i < assignments; i++) {
-    const bibValue = (min + i).toString();
+  let currentNumber = min;
+  for (let i = 0; i < sortedTargets.length && updates.length < assignments; i++) {
+    while (usedBibs.has(currentNumber.toString()) && currentNumber <= max) {
+      currentNumber += 1;
+    }
+    if (currentNumber > max) break;
+    const bibValue = currentNumber.toString();
+    usedBibs.add(bibValue);
     updates.push({
       id: sortedTargets[i].id,
       data: { bibNumber: bibValue, chipNumber: generateChipNumber(bibValue) },
     });
+    currentNumber += 1;
   }
 
   if (updates.length > 0) {
@@ -303,6 +387,55 @@ export async function bulkAssignBibNumbers(options: BibAssignmentFilters) {
   }
 
   return { assigned: updates.length, total: targets.length, skipped: targets.length - updates.length };
+}
+
+export async function bulkClearBibNumbers(target: CategoryAssignmentTarget, raceId: string) {
+  const participants = await db.getParticipants(raceId);
+  const targets = resolveTargetParticipants(target, participants).filter((p) => p.bibNumber);
+
+  if (targets.length === 0) {
+    return { cleared: 0 };
+  }
+
+  await db.bulkUpdateParticipants(
+    targets.map((p) => ({ id: p.id, data: { bibNumber: null, chipNumber: null } }))
+  );
+
+  revalidatePath("/");
+  revalidatePath("/competitors");
+  return { cleared: targets.length };
+}
+
+export async function bulkReassignDistance(
+  target: CategoryAssignmentTarget,
+  newDistance: Participant["distance"],
+  raceDate: Date,
+  ageCalculationMethod: AgeCalculationMethod,
+  raceId: string
+) {
+  const participants = await db.getParticipants(raceId);
+  const targets = resolveTargetParticipants(target, participants);
+
+  if (targets.length === 0) {
+    return { updated: 0 };
+  }
+
+  const categories = await db.getCategories(raceId);
+  const updates = targets.map((participant) => {
+    const nextCategory = assignCategory(
+      { ...participant, distance: newDistance },
+      categories,
+      raceDate,
+      ageCalculationMethod
+    );
+
+    return { id: participant.id, data: { distance: newDistance, categoryId: nextCategory } };
+  });
+
+  await db.bulkUpdateParticipants(updates);
+  revalidatePath("/");
+  revalidatePath("/competitors");
+  return { updated: updates.length };
 }
 
 export async function assignCategoriesToParticipants(
@@ -367,6 +500,7 @@ export async function addCategory(
   categoryData: CategoryInput
 ) {
   const validatedData = categorySchema.parse(categoryData);
+  await assertCategoryDoesNotOverlap(validatedData);
   await db.addCategory(validatedData);
   revalidatePath("/categories");
   revalidatePath("/");
@@ -374,6 +508,7 @@ export async function addCategory(
 
 export async function updateCategory(id: string, categoryData: CategoryInput) {
   const validatedData = categorySchema.parse(categoryData);
+  await assertCategoryDoesNotOverlap(validatedData, undefined, id);
   await db.updateCategory(id, validatedData);
   revalidatePath("/categories");
   revalidatePath("/");
@@ -419,6 +554,26 @@ const bulkCategorySchema = z.object({
   nameTemplate: z.string().min(1),
   genderFormat: z.enum(['long', 'short']).default('long'),
 });
+
+const assertCategoryDoesNotOverlap = async (
+  candidate: CategoryInput,
+  existingCategories?: Category[],
+  excludeId?: string
+) => {
+  const categories = existingCategories ?? (await db.getCategories(candidate.raceId));
+  const conflict = categories.find((cat) => {
+    if (excludeId && cat.id === excludeId) return false;
+    if (cat.distance !== candidate.distance) return false;
+    if (!gendersCompatible(cat.gender, candidate.gender)) return false;
+    return hasAgeOverlap({ min: cat.minAge, max: cat.maxAge }, { min: candidate.minAge, max: candidate.maxAge });
+  });
+
+  if (conflict) {
+    throw new Error(
+      `Ya existe una categoría que usa edades ${conflict.minAge}-${conflict.maxAge} para ${conflict.gender === 'Any' ? 'cualquier género' : conflict.gender} en ${conflict.distance}.`
+    );
+  }
+};
 
 export async function bulkAddCategories(
   data: z.infer<typeof bulkCategorySchema>,
@@ -496,6 +651,7 @@ export async function bulkAddCategories(
   };
 
   const creations: Promise<string>[] = [];
+  const existing = await db.getCategories(raceId);
   for (const ageRange of ageRanges) {
     for (const distance of distances) {
       for (const gender of genders) {
@@ -508,6 +664,8 @@ export async function bulkAddCategories(
           distance: distance as Category['distance'],
           gender: gender as Category['gender'],
         };
+        await assertCategoryDoesNotOverlap(newCategory, existing);
+        existing.push({ id: "pending", ...newCategory });
         creations.push(db.addCategory(newCategory));
       }
     }

@@ -62,6 +62,8 @@ import {
   bulkDeleteParticipants,
   assignCategoriesToParticipants,
   bulkAssignBibNumbers,
+  bulkClearBibNumbers,
+  bulkReassignDistance,
 } from "@/lib/actions";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -70,7 +72,13 @@ import Link from "next/link";
 
 const participantSchema = z.object({
   id: z.string().optional(),
-  bibNumber: z.string().min(1, "El dorsal es requerido"),
+  bibNumber: z
+    .string()
+    .optional()
+    .transform((val) => {
+      const trimmed = val?.toString().trim();
+      return trimmed && trimmed.length > 0 ? trimmed : undefined;
+    }),
   name: z.string().min(1, "El nombre es requerido"),
   surname: z.string().min(1, "El apellido es requerido"),
   dni: z.string().min(1, "El DNI/ID es requerido"),
@@ -210,6 +218,15 @@ export function CompetitorsManager({
   const [bibGender, setBibGender] = useState<Participant["gender"] | "any">("any");
   const [bibTarget, setBibTarget] = useState<"missing" | "selected">("missing");
   const [isAssigningBibs, setIsAssigningBibs] = useState(false);
+  const [isDistanceDialogOpen, setIsDistanceDialogOpen] = useState(false);
+  const [distanceTarget, setDistanceTarget] = useState<"selected" | "range" | "all">("selected");
+  const [distanceRange, setDistanceRange] = useState<{ fromBib: string; toBib: string }>({ fromBib: "", toBib: "" });
+  const [newDistance, setNewDistance] = useState<Participant["distance"]>("5k");
+  const [isReassigningDistance, setIsReassigningDistance] = useState(false);
+  const [isClearDialogOpen, setIsClearDialogOpen] = useState(false);
+  const [clearTarget, setClearTarget] = useState<"selected" | "range" | "all">("selected");
+  const [clearRange, setClearRange] = useState<{ fromBib: string; toBib: string }>({ fromBib: "", toBib: "" });
+  const [isClearingBibs, setIsClearingBibs] = useState(false);
 
   const categoryMap = useMemo(() => {
     return categories.reduce((acc, category) => {
@@ -330,7 +347,7 @@ export function CompetitorsManager({
         return;
       }
       const participantInput: ParticipantInput = {
-        bibNumber: values.bibNumber,
+        bibNumber: values.bibNumber ?? null,
         name: values.name,
         surname: values.surname,
         dni: values.dni,
@@ -522,6 +539,82 @@ export function CompetitorsManager({
       toast({ variant: "destructive", title: "Error", description: "No se pudieron asignar los dorsales." });
     } finally {
       setIsAssigningBibs(false);
+    }
+  };
+
+  const buildTarget = (mode: "selected" | "range" | "all", range?: { fromBib: string; toBib: string }) => {
+    if (mode === "all") return { type: "all" } as const;
+    if (mode === "selected") return { type: "selection", ids: Array.from(selectedParticipants) } as const;
+    return { type: "range", fromBib: range?.fromBib.trim() ?? "", toBib: range?.toBib.trim() ?? "" } as const;
+  };
+
+  const handleDistanceReassign = async () => {
+    if (!raceId) {
+      toast({ variant: "destructive", title: "Selecciona una carrera", description: "Debes elegir una carrera para reasignar distancias." });
+      return;
+    }
+    if (distanceTarget === "selected" && selectedParticipants.size === 0) {
+      toast({ variant: "destructive", title: "Selecciona participantes", description: "Elige a quién cambiarle la distancia." });
+      return;
+    }
+    if (distanceTarget === "range" && (!distanceRange.fromBib.trim() || !distanceRange.toBib.trim())) {
+      toast({ variant: "destructive", title: "Rango requerido", description: "Indica los dorsales inicial y final." });
+      return;
+    }
+
+    setIsReassigningDistance(true);
+    try {
+      const target = buildTarget(distanceTarget, distanceRange);
+      const result = await bulkReassignDistance(target, newDistance, raceDate, ageCalculationMethod, raceId);
+      if (result.updated === 0) {
+        toast({ variant: "destructive", title: "Sin cambios", description: "No se encontraron participantes para actualizar." });
+      } else {
+        toast({ title: "Distancias actualizadas", description: `Se reasignaron ${result.updated} participantes a ${newDistance}.` });
+        setIsDistanceDialogOpen(false);
+        if (distanceTarget === "selected") {
+          setSelectedParticipants(new Set());
+        }
+      }
+    } catch (error) {
+      console.error(error);
+      toast({ variant: "destructive", title: "Error", description: "No se pudieron reasignar las distancias." });
+    } finally {
+      setIsReassigningDistance(false);
+    }
+  };
+
+  const handleClearBibs = async () => {
+    if (!raceId) {
+      toast({ variant: "destructive", title: "Selecciona una carrera", description: "Debes elegir una carrera para limpiar dorsales." });
+      return;
+    }
+    if (clearTarget === "selected" && selectedParticipants.size === 0) {
+      toast({ variant: "destructive", title: "Selecciona participantes", description: "Elige a quién quitarle el dorsal." });
+      return;
+    }
+    if (clearTarget === "range" && (!clearRange.fromBib.trim() || !clearRange.toBib.trim())) {
+      toast({ variant: "destructive", title: "Rango requerido", description: "Indica los dorsales inicial y final." });
+      return;
+    }
+
+    setIsClearingBibs(true);
+    try {
+      const target = buildTarget(clearTarget, clearRange);
+      const result = await bulkClearBibNumbers(target, raceId);
+      if (result.cleared === 0) {
+        toast({ variant: "destructive", title: "Sin dorsales", description: "No se encontraron dorsales para limpiar." });
+      } else {
+        toast({ title: "Dorsales eliminados", description: `Se limpiaron ${result.cleared} dorsales y chips.` });
+        setIsClearDialogOpen(false);
+        if (clearTarget === "selected") {
+          setSelectedParticipants(new Set());
+        }
+      }
+    } catch (error) {
+      console.error(error);
+      toast({ variant: "destructive", title: "Error", description: "No se pudieron eliminar los dorsales." });
+    } finally {
+      setIsClearingBibs(false);
     }
   };
 
@@ -874,6 +967,20 @@ export function CompetitorsManager({
               disabled={participants.length === 0}
             >
               <Hash className="mr-2 h-4 w-4" /> Asignar dorsales
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setIsClearDialogOpen(true)}
+              disabled={participants.length === 0}
+            >
+              <Hash className="mr-2 h-4 w-4" /> Quitar dorsales
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setIsDistanceDialogOpen(true)}
+              disabled={participants.length === 0}
+            >
+              <Hash className="mr-2 h-4 w-4" /> Reasignar distancia
             </Button>
             <Button
               variant="secondary"
@@ -1333,6 +1440,116 @@ export function CompetitorsManager({
             </DialogClose>
             <Button onClick={handleBibAssignment} disabled={isAssigningBibs}>
               Asignar dorsales
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isClearDialogOpen} onOpenChange={setIsClearDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Quitar dorsales y chips</DialogTitle>
+            <DialogDescription>Elimina el número y chip de los participantes seleccionados, por rango o de todos.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Label>Destino</Label>
+            <RadioGroup value={clearTarget} onValueChange={(value) => setClearTarget(value as typeof clearTarget)}>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="selected" id="clear-selected" />
+                <Label htmlFor="clear-selected" className="font-normal">
+                  Solo seleccionados ({selectedCount})
+                </Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="range" id="clear-range" />
+                <Label htmlFor="clear-range" className="font-normal">Rango de dorsales</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="all" id="clear-all" />
+                <Label htmlFor="clear-all" className="font-normal">Todos los participantes</Label>
+              </div>
+            </RadioGroup>
+            {clearTarget === "range" && (
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Dorsal desde</Label>
+                  <Input value={clearRange.fromBib} onChange={(event) => setClearRange((prev) => ({ ...prev, fromBib: event.target.value }))} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Dorsal hasta</Label>
+                  <Input value={clearRange.toBib} onChange={(event) => setClearRange((prev) => ({ ...prev, toBib: event.target.value }))} />
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="secondary">Cancelar</Button>
+            </DialogClose>
+            <Button onClick={handleClearBibs} disabled={isClearingBibs}>
+              Limpiar dorsales
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isDistanceDialogOpen} onOpenChange={setIsDistanceDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Reasignar distancia</DialogTitle>
+            <DialogDescription>Actualiza la distancia de los participantes y recalcula su categoría.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Label>Nueva distancia</Label>
+            <Select value={newDistance} onValueChange={(value) => setNewDistance(value as Participant["distance"])}>
+              <SelectTrigger>
+                <SelectValue placeholder="Selecciona distancia" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="5k">5k</SelectItem>
+                <SelectItem value="10k">10k</SelectItem>
+                <SelectItem value="21k">21k</SelectItem>
+                <SelectItem value="42k">42k</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <div className="space-y-2">
+              <Label>Destino</Label>
+              <RadioGroup value={distanceTarget} onValueChange={(value) => setDistanceTarget(value as typeof distanceTarget)}>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="selected" id="dist-selected" />
+                  <Label htmlFor="dist-selected" className="font-normal">Solo seleccionados ({selectedCount})</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="range" id="dist-range" />
+                  <Label htmlFor="dist-range" className="font-normal">Rango de dorsales</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="all" id="dist-all" />
+                  <Label htmlFor="dist-all" className="font-normal">Todos los participantes</Label>
+                </div>
+              </RadioGroup>
+            </div>
+
+            {distanceTarget === "range" && (
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Dorsal desde</Label>
+                  <Input value={distanceRange.fromBib} onChange={(event) => setDistanceRange((prev) => ({ ...prev, fromBib: event.target.value }))} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Dorsal hasta</Label>
+                  <Input value={distanceRange.toBib} onChange={(event) => setDistanceRange((prev) => ({ ...prev, toBib: event.target.value }))} />
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="secondary">Cancelar</Button>
+            </DialogClose>
+            <Button onClick={handleDistanceReassign} disabled={isReassigningDistance}>
+              Actualizar distancia
             </Button>
           </DialogFooter>
         </DialogContent>
