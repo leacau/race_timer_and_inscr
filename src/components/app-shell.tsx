@@ -14,16 +14,7 @@ import {
   useSidebar,
   SidebarProvider,
 } from "@/components/ui/sidebar";
-import {
-  Users,
-  Timer,
-  Settings,
-  Shield,
-  Eye,
-  LogOut,
-  LayoutGrid,
-  CalendarIcon,
-} from "lucide-react";
+import { Settings, Shield, Eye, LogOut, CalendarIcon } from "lucide-react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { RaceTimerProLogo } from "./icons";
@@ -54,25 +45,18 @@ import {
   SelectValue,
 } from "./ui/select";
 
-const navItems = [
-  { href: "/", icon: Timer, label: "Cronometraje" },
-  { href: "/competitors", icon: Users, label: "Competidores" },
-  { href: "/categories", icon: LayoutGrid, label: "Categorías" },
-  { href: "/races", icon: CalendarIcon, label: "Carreras" },
-];
+const navItems = [{ href: "/races", icon: CalendarIcon, label: "Carreras" }];
 
 function AppHeader() {
   const { role, setRole, raceDate, setRaceDate, ageCalculationMethod, setAgeCalculationMethod } = React.useContext(AppContext);
   const { isMobile } = useSidebar();
 
+  const pathname = usePathname();
   const pageTitles: { [key: string]: string } = {
-    "/": "Cronometraje",
-    "/competitors": "Gestión de Competidores",
-    "/categories": "Administrar Categorías",
     "/races": "Carreras",
   };
-  const pathname = usePathname();
-  const title = pageTitles[pathname] ?? "Panel";
+  const raceDetailTitle = pathname.startsWith("/races/") ? "Carrera" : null;
+  const title = raceDetailTitle ?? pageTitles[pathname] ?? "Panel";
 
   return (
     <header className="flex h-16 items-center justify-between gap-4 border-b bg-card px-4 md:px-6">

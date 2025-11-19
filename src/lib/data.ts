@@ -5,6 +5,7 @@ import { db } from "./firebase";
 import {
     collection,
     getDocs,
+    getDoc,
     addDoc,
     updateDoc,
     deleteDoc,
@@ -145,6 +146,13 @@ export async function getRaces(): Promise<Race[]> {
     const q = query(racesCol, orderBy("eventDate", "desc"));
     const snapshot = await getDocs(q);
     return snapshot.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<Race, "id">) }));
+}
+
+export async function getRaceById(id: string): Promise<Race | null> {
+    const raceRef = doc(db, "races", id);
+    const snapshot = await getDoc(raceRef);
+    if (!snapshot.exists()) return null;
+    return { id: snapshot.id, ...(snapshot.data() as Omit<Race, "id">) };
 }
 
 export async function addRace(data: RaceInput): Promise<string> {

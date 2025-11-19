@@ -319,12 +319,54 @@ export function TimingDashboard({
   >({});
   const [duplicateArrivals, setDuplicateArrivals] = useState<ArrivalEntry[]>([]);
   const [duplicateCounters, setDuplicateCounters] = useState<Record<string, number>>({});
+  const [localParticipants, setLocalParticipants] = useState<Participant[]>(participants);
+  const [localStartTimes, setLocalStartTimes] = useState<Record<string, number>>({});
   const raceName = activeRace?.name ?? "Carrera";
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 500);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    try {
+      const cached = localStorage.getItem(`race:${raceId}:participants`);
+      if (cached) {
+        const parsed = JSON.parse(cached) as Participant[];
+        setLocalParticipants(parsed);
+      }
+      const cachedStarts = localStorage.getItem(`race:${raceId}:startTimes`);
+      if (cachedStarts) {
+        setLocalStartTimes(JSON.parse(cachedStarts));
+      }
+    } catch (error) {
+      console.error("No se pudo leer la caché local", error);
+    }
+  }, [raceId]);
+
+  useEffect(() => {
+    setLocalParticipants((prev) => {
+      const previousMap = new Map(prev.map((p) => [p.id, p] as const));
+      const merged = participants.map((participant) => {
+        const cached = previousMap.get(participant.id);
+        if (!cached) return participant;
+        if (!participant.finishTime && cached.finishTime) {
+          return { ...participant, finishTime: cached.finishTime, startTime: cached.startTime ?? participant.startTime };
+        }
+        return participant;
+      });
+      return merged;
+    });
+  }, [participants]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(`race:${raceId}:participants`, JSON.stringify(localParticipants));
+      localStorage.setItem(`race:${raceId}:startTimes`, JSON.stringify(localStartTimes));
+    } catch (error) {
+      console.error("No se pudo guardar la caché local", error);
+    }
+  }, [localParticipants, localStartTimes, raceId]);
 
   const categoriesMap = useMemo(() => {
     return categories.reduce((acc, category) => {
@@ -341,12 +383,12 @@ export function TimingDashboard({
 
   const resolveParticipantsForGroup = (group: TimingGroup) => {
     if (mode === "general") {
-      return participants;
+      return localParticipants;
     }
     if (mode === "distance") {
-      return participants.filter((participant) => participant.distance === group.actionGroupId);
+      return localParticipants.filter((participant) => participant.distance === group.actionGroupId);
     }
-    return participants.filter((participant) => {
+    return localParticipants.filter((participant) => {
       if (!group.actionGroupId) {
         return !participant.categoryId;
       }
@@ -355,16 +397,16 @@ export function TimingDashboard({
   };
 
   const groups = useMemo<TimingGroup[]>(() => {
-    if (participants.length === 0) return [];
+    if (localParticipants.length === 0) return [];
 
     if (mode === "general") {
       return [
         {
           key: "general",
           label: "Cronómetro general",
-          participantCount: participants.length,
-          finishedCount: participants.filter((p) => p.finishTime).length,
-          startTime: getGroupStart(participants),
+          participantCount: localParticipants.length,
+          finishedCount: localParticipants.filter((p) => p.finishTime).length,
+          startTime: getGroupStart(localParticipants),
           actionGroupId: null,
         },
       ];
@@ -372,7 +414,7 @@ export function TimingDashboard({
 
     if (mode === "distance") {
       const map = new Map<string, Participant[]>();
-      participants.forEach((participant) => {
+      localParticipants.forEach((participant) => {
         const current = map.get(participant.distance) ?? [];
         current.push(participant);
         map.set(participant.distance, current);
@@ -391,7 +433,7 @@ export function TimingDashboard({
     }
 
     const map = new Map<string, { label: string; members: Participant[]; actionGroupId: string | null }>();
-    participants.forEach((participant) => {
+    localParticipants.forEach((participant) => {
       const categoryId = participant.categoryId ?? "__sin_categoria__";
       const label = participant.categoryId ? categoriesMap[participant.categoryId] ?? "Sin categoría" : "Sin categoría";
       if (!map.has(categoryId)) {
@@ -410,7 +452,7 @@ export function TimingDashboard({
         startTime: getGroupStart(value.members),
         actionGroupId: value.actionGroupId,
       }));
-  }, [mode, participants, categoriesMap]);
+  }, [mode, localParticipants, categoriesMap]);
 
   useEffect(() => {
     setStoppedGroups((prev) => {
@@ -430,13 +472,14 @@ export function TimingDashboard({
   const startTimeLookup = useMemo(() => {
     const lookup: Record<string, number | null> = {};
     groups.forEach((group) => {
-      lookup[group.key] = group.startTime;
+      const localStart = localStartTimes[group.key];
+      lookup[group.key] = group.startTime ?? localStart ?? null;
     });
     return lookup;
-  }, [groups]);
+  }, [groups, localStartTimes]);
 
   const finisherEntries = useMemo<ArrivalEntry[]>(() => {
-    return participants
+    return localParticipants
       .filter((participant) => participant.finishTime && participant.startTime)
       .map((participant) => ({
         id: participant.id,
@@ -451,14 +494,14 @@ export function TimingDashboard({
         startTime: participant.startTime!,
         finishTime: participant.finishTime!,
       }));
-  }, [participants]);
+  }, [localParticipants]);
 
   const participantMapById = useMemo(() => {
-    return participants.reduce((acc, participant) => {
+    return localParticipants.reduce((acc, participant) => {
       acc[participant.id] = participant;
       return acc;
     }, {} as Record<string, Participant>);
-  }, [participants]);
+  }, [localParticipants]);
 
   const finishers = useMemo(() => {
     return [...finisherEntries, ...duplicateArrivals].sort((a, b) => a.finishTime - b.finishTime);
@@ -516,6 +559,8 @@ export function TimingDashboard({
     }
     setStartingGroupKey(group.key);
     try {
+      const localStart = Date.now();
+      setLocalStartTimes((prev) => ({ ...prev, [group.key]: localStart }));
       await startTimingGroup(raceId, mode, group.actionGroupId);
       setStoppedGroups((prev) => {
         if (!prev[group.key]) return prev;
@@ -530,21 +575,28 @@ export function TimingDashboard({
     } catch (error) {
       console.error(error);
       toast({ variant: "destructive", title: "Error", description: "No se pudo iniciar el cronómetro seleccionado." });
+      setLocalStartTimes((prev) => {
+        const next = { ...prev };
+        delete next[group.key];
+        return next;
+      });
     } finally {
       setStartingGroupKey(null);
     }
   };
 
   const handleStopGroup = (group: TimingGroup) => {
-    if (!group.startTime) return;
+    const referenceStart = group.startTime ?? startTimeLookup[group.key];
+    if (!referenceStart) return;
     setStoppedGroups((prev) => ({
       ...prev,
-      [group.key]: { pausedAt: Date.now(), referenceStart: group.startTime! },
+      [group.key]: { pausedAt: Date.now(), referenceStart },
     }));
   };
 
   const handleResetGroup = async (group: TimingGroup) => {
-    if (!group.startTime) return;
+    const referenceStart = group.startTime ?? startTimeLookup[group.key];
+    if (!referenceStart) return;
     const confirmReset = window.confirm(
       "Reseteará el cronómetro y limpiará las llegadas registradas para este grupo. ¿Deseas continuar?"
     );
@@ -559,11 +611,24 @@ export function TimingDashboard({
         delete next[group.key];
         return next;
       });
+      setLocalStartTimes((prev) => {
+        const next = { ...prev };
+        delete next[group.key];
+        return next;
+      });
       const participantsInGroup = resolveParticipantsForGroup(group);
       if (participantsInGroup.length > 0) {
         const ids = new Set(participantsInGroup.map((participant) => participant.id));
         const bibs = new Set(participantsInGroup.map((participant) => participant.bibNumber));
         setDuplicateArrivals((prev) => prev.filter((arrival) => !ids.has(arrival.participantId)));
+        setLocalParticipants((prev) =>
+          prev.map((participant) => {
+            if (ids.has(participant.id)) {
+              return { ...participant, finishTime: null, startTime: null };
+            }
+            return participant;
+          })
+        );
         setDuplicateCounters((prev) => {
           const next = { ...prev };
           bibs.forEach((bib) => {
@@ -590,15 +655,16 @@ export function TimingDashboard({
     event.preventDefault();
     if (!manualBib.trim()) return;
     const bib = manualBib.trim();
-    const participant = participants.find((p) => p.bibNumber === bib);
+    const capturedAt = Date.now();
+    setManualBib("");
+    const participant = localParticipants.find((p) => p.bibNumber === bib);
     if (!participant || !participant.bibNumber) {
       toast({ variant: "destructive", title: "Dorsal no encontrado", description: `No existe el dorsal ${bib}.` });
-      setManualBib("");
       return;
     }
 
     const groupKey = getGroupKeyForParticipant(participant, mode);
-    const startTime = startTimeLookup[groupKey];
+    const startTime = participant.startTime ?? startTimeLookup[groupKey];
     if (!startTime) {
       toast({
         variant: "destructive",
@@ -610,8 +676,8 @@ export function TimingDashboard({
 
     setIsSavingManual(true);
     try {
-      const finishTime = Date.now();
-      const effectiveStartTime = participant.startTime ?? startTime;
+      const finishTime = capturedAt;
+      const effectiveStartTime = startTime;
 
       if (participant.finishTime) {
         const nextIndex = duplicateCounters[bib] ?? 0;
@@ -637,16 +703,21 @@ export function TimingDashboard({
           title: "Tiempo duplicado registrado",
           description: `El dorsal ${bib} ya tenía un registro. Se agregó como ${displayBib}.`,
         });
-        setManualBib("");
         return;
       }
 
       await updateParticipantTime(participant.id, effectiveStartTime, finishTime);
+      setLocalParticipants((prev) =>
+        prev.map((current) =>
+          current.id === participant.id
+            ? { ...current, startTime: current.startTime ?? effectiveStartTime, finishTime }
+            : current
+        )
+      );
       toast({
         title: "Tiempo registrado",
         description: `Se registró la llegada del dorsal ${bib}.`,
       });
-      setManualBib("");
     } catch (error) {
       console.error(error);
       toast({ variant: "destructive", title: "Error", description: "No se pudo registrar el tiempo." });

@@ -102,7 +102,7 @@ export function RacesManager({ races }: { races: Race[] }) {
                 <TableRow>
                   <TableHead>Nombre</TableHead>
                   <TableHead>Fecha</TableHead>
-                  <TableHead className="w-32">Acciones</TableHead>
+                  <TableHead className="w-40">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -111,6 +111,9 @@ export function RacesManager({ races }: { races: Race[] }) {
                     <TableCell className="font-medium">{race.name}</TableCell>
                     <TableCell>{race.eventDate ? format(new Date(race.eventDate), "PPP", { locale: es }) : "Sin fecha"}</TableCell>
                     <TableCell className="flex gap-2">
+                      <Button variant="secondary" size="sm" asChild>
+                        <a href={`/races/${race.id}`}>Gestionar</a>
+                      </Button>
                       <Button variant="outline" size="icon" onClick={() => handleOpen(race)}>
                         <Pencil className="h-4 w-4" />
                       </Button>
