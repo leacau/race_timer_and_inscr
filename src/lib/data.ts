@@ -17,6 +17,17 @@ import {
 } from "firebase/firestore";
 import type { Participant, Category, CategoryInput, ParticipantFirestoreData, Race, RaceInput } from "./types";
 
+const sanitizeRaceDoc = (id: string, data: Omit<Race, "id">): Race => ({
+    id,
+    name: data.name,
+    eventDate: data.eventDate,
+    distances: Array.isArray((data as any).distances) && (data as any).distances.length > 0
+        ? (data as any).distances
+        : ["5k", "10k", "21k", "42k"],
+    ageCalculationMethod: (data as any).ageCalculationMethod ?? "raceDay",
+    registrationsOpen: (data as any).registrationsOpen ?? true,
+});
+
 export async function getParticipants(raceId?: string | null): Promise<Participant[]> {
     const participantsCol = collection(db, "participants");
     const constraints = raceId ? [where("raceId", "==", raceId)] : [];
@@ -145,14 +156,14 @@ export async function getRaces(): Promise<Race[]> {
     const racesCol = collection(db, "races");
     const q = query(racesCol, orderBy("eventDate", "desc"));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<Race, "id">) }));
+    return snapshot.docs.map((doc) => sanitizeRaceDoc(doc.id, doc.data() as Omit<Race, "id">));
 }
 
 export async function getRaceById(id: string): Promise<Race | null> {
     const raceRef = doc(db, "races", id);
     const snapshot = await getDoc(raceRef);
     if (!snapshot.exists()) return null;
-    return { id: snapshot.id, ...(snapshot.data() as Omit<Race, "id">) };
+    return sanitizeRaceDoc(snapshot.id, snapshot.data() as Omit<Race, "id">);
 }
 
 export async function addRace(data: RaceInput): Promise<string> {

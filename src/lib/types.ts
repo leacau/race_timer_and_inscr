@@ -11,7 +11,7 @@ export type Participant = {
   surname: string;
   dni: string;
   gender: 'Male' | 'Female' | 'Other';
-  distance: '5k' | '10k' | '21k' | '42k';
+  distance: string;
   birthDate: string; // YYYY-MM-DD
   categoryId: string | null;
   startTime: number | null;
@@ -30,7 +30,7 @@ export type ParticipantInput = {
   surname: string;
   dni: string;
   gender: 'Male' | 'Female' | 'Other';
-  distance: '5k' | '10k' | '21k' | '42k';
+  distance: string;
   birthDate: string; // YYYY-MM-DD
   city?: string;
   province?: string;
@@ -48,7 +48,7 @@ export type Category = {
   minAge: number;
   maxAge: number;
   gender: 'Male' | 'Female' | 'Other' | 'Any';
-  distance: '5k' | '10k' | '21k' | '42k';
+  distance: string;
 };
 
 export type CategoryInput = Omit<Category, 'id'>;
@@ -57,6 +57,9 @@ export type Race = {
   id: string;
   name: string;
   eventDate: string; // YYYY-MM-DD
+  distances: string[];
+  ageCalculationMethod: AgeCalculationMethod;
+  registrationsOpen: boolean;
 };
 
 export type RaceInput = Omit<Race, 'id'>;

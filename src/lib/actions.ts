@@ -13,6 +13,7 @@ import type {
   Participant,
   ParticipantFirestoreData,
   ParticipantInput,
+  Race,
   RaceInput,
 } from "./types";
 
@@ -27,6 +28,20 @@ export type CategoryAssignmentOptions =
   | { strategy: "manual"; target: SelectionTarget; categoryId: string | null };
 
 export type TimingMode = 'general' | 'distance' | 'category';
+
+const loadRaceOrThrow = async (raceId: string): Promise<Race> => {
+  const race = await db.getRaceById(raceId);
+  if (!race) {
+    throw new Error("No se encontró la carrera seleccionada.");
+  }
+  return race;
+};
+
+const assertRaceAllowsDistance = (race: Race, distance: string) => {
+  if (!race.distances.includes(distance)) {
+    throw new Error("La distancia elegida no está habilitada en la configuración de la carrera.");
+  }
+};
 
 const hasAgeOverlap = (
   a: { min: number; max: number },
@@ -93,9 +108,14 @@ export async function addParticipant(
   ageCalculationMethod: AgeCalculationMethod,
   raceId: string
 ) {
+  const race = await loadRaceOrThrow(raceId);
+  if (!race.registrationsOpen) {
+    throw new Error("Las inscripciones están cerradas para esta carrera.");
+  }
+  assertRaceAllowsDistance(race, participantData.distance);
   const existing = await db.getParticipants(raceId);
   const categories = await db.getCategories(raceId);
-  const categoryId = assignCategory(participantData, categories, raceDate, ageCalculationMethod);
+  const categoryId = assignCategory(participantData, categories, raceDate, race.ageCalculationMethod ?? ageCalculationMethod);
   const bibNumber = participantData.bibNumber?.toString().trim() || null;
   const chipNumber = generateChipNumber(bibNumber);
 
@@ -129,9 +149,11 @@ export async function updateParticipant(
   ageCalculationMethod: AgeCalculationMethod,
   raceId: string
 ) {
+  const race = await loadRaceOrThrow(raceId);
+  assertRaceAllowsDistance(race, participantData.distance);
   const existing = await db.getParticipants(raceId);
   const categories = await db.getCategories(raceId);
-  const categoryId = assignCategory(participantData, categories, raceDate, ageCalculationMethod);
+  const categoryId = assignCategory(participantData, categories, raceDate, race.ageCalculationMethod ?? ageCalculationMethod);
   const bibNumber = participantData.bibNumber?.toString().trim() || null;
   const chipNumber = generateChipNumber(bibNumber);
 
@@ -239,11 +261,16 @@ export async function importParticipants(
   ageCalculationMethod: AgeCalculationMethod,
   raceId: string
 ) {
+  const race = await loadRaceOrThrow(raceId);
+  if (!race.registrationsOpen) {
+    throw new Error("Las inscripciones están cerradas para esta carrera.");
+  }
   const categories = await db.getCategories(raceId);
   const existing = await db.getParticipants(raceId);
 
   const participantsToCreate = participants.map((p) => {
-    const categoryId = assignCategory(p, categories, raceDate, ageCalculationMethod);
+    assertRaceAllowsDistance(race, p.distance);
+    const categoryId = assignCategory(p, categories, raceDate, race.ageCalculationMethod ?? ageCalculationMethod);
     const bibNumber = p.bibNumber?.toString().trim() || null;
     const chipNumber = generateChipNumber(bibNumber);
 
@@ -493,13 +520,15 @@ const categorySchema = z.object({
   minAge: z.coerce.number().int(),
   maxAge: z.coerce.number().int(),
   gender: z.enum(["Any", "Male", "Female", "Other"]),
-  distance: z.enum(["5k", "10k", "21k", "42k"]),
+  distance: z.string().min(1),
 });
 
 export async function addCategory(
   categoryData: CategoryInput
 ) {
   const validatedData = categorySchema.parse(categoryData);
+  const race = await loadRaceOrThrow(validatedData.raceId);
+  assertRaceAllowsDistance(race, validatedData.distance);
   await assertCategoryDoesNotOverlap(validatedData);
   await db.addCategory(validatedData);
   revalidatePath("/categories");
@@ -508,6 +537,8 @@ export async function addCategory(
 
 export async function updateCategory(id: string, categoryData: CategoryInput) {
   const validatedData = categorySchema.parse(categoryData);
+  const race = await loadRaceOrThrow(validatedData.raceId);
+  assertRaceAllowsDistance(race, validatedData.distance);
   await assertCategoryDoesNotOverlap(validatedData, undefined, id);
   await db.updateCategory(id, validatedData);
   revalidatePath("/categories");
@@ -580,6 +611,11 @@ export async function bulkAddCategories(
   raceId: string
 ) {
   const validatedData = bulkCategorySchema.parse(data);
+  const race = await loadRaceOrThrow(raceId);
+  const invalidDistance = validatedData.distances.find((distance) => !race.distances.includes(distance));
+  if (invalidDistance) {
+    throw new Error("No puedes crear categorías con distancias que no pertenezcan a la carrera.");
+  }
   const { ageRanges, distances, nameTemplate, genderFormat } = validatedData;
   let { genders } = validatedData;
 

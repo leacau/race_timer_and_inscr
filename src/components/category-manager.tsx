@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useContext, useEffect } from "react";
+import { useState, useContext, useEffect, useMemo } from "react";
 import { Plus, Edit, Trash2, MoreVertical, Sparkles } from "lucide-react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -71,7 +71,7 @@ const categorySchema = z.object({
   minAge: z.coerce.number().int().min(0),
   maxAge: z.coerce.number().int().min(0),
   gender: z.enum(["Any", "Male", "Female", "Other"]),
-  distance: z.enum(["5k", "10k", "21k", "42k"]),
+  distance: z.string().min(1),
 });
 
 const bulkCategorySchema = z.object({
@@ -141,6 +141,11 @@ export function CategoryManager({
     );
   }
 
+  const allowedDistances = useMemo(
+    () => (activeRace?.distances?.length ? activeRace.distances : ["5k", "10k", "21k", "42k"]),
+    [activeRace?.distances]
+  );
+
   const form = useForm<CategoryFormValues>({
     resolver: zodResolver(categorySchema),
     defaultValues: {
@@ -149,7 +154,7 @@ export function CategoryManager({
       minAge: 0,
       maxAge: 99,
       gender: "Any",
-      distance: "5k",
+      distance: allowedDistances[0],
     },
   });
 
@@ -157,13 +162,17 @@ export function CategoryManager({
     if (raceId) {
       form.setValue("raceId", raceId);
     }
-  }, [raceId, form]);
+    if (allowedDistances.length) {
+      form.setValue("distance", allowedDistances[0]);
+      bulkForm.setValue("distances", allowedDistances);
+    }
+  }, [raceId, form, bulkForm, allowedDistances]);
 
   const bulkForm = useForm<BulkCategoryFormValues>({
     resolver: zodResolver(bulkCategorySchema),
     defaultValues: {
       ageRanges: [{ min: 18, max: 29 }],
-      distances: [],
+      distances: allowedDistances,
       genders: [],
       nameTemplate: "[[distancia]]K [[genero]] DE [[edad min]] A [[edad max]] AÑOS",
       genderFormat: "long",
@@ -196,7 +205,7 @@ export function CategoryManager({
   const handleOpenBulkDialog = () => {
     bulkForm.reset({
       ageRanges: [{ min: 18, max: 29 }],
-      distances: [],
+      distances: allowedDistances,
       genders: [],
       nameTemplate: "[[distancia]]K [[genero]] DE [[edad min]] A [[edad max]] AÑOS",
       genderFormat: "long",
@@ -208,6 +217,14 @@ export function CategoryManager({
     try {
       if (!raceId) {
         toast({ variant: "destructive", title: "Selecciona una carrera", description: "Debes elegir una carrera antes de guardar categorías." });
+        return;
+      }
+      if (!allowedDistances.includes(values.distance)) {
+        toast({
+          variant: "destructive",
+          title: "Distancia inválida",
+          description: "Solo puedes usar distancias configuradas en la carrera.",
+        });
         return;
       }
       const payload = { ...values, raceId };
@@ -233,6 +250,15 @@ export function CategoryManager({
     try {
       if (!raceId) {
         toast({ variant: "destructive", title: "Selecciona una carrera", description: "Crea o elige una carrera antes de generar categorías." });
+        return;
+      }
+      const invalidDistance = values.distances.find((d) => !allowedDistances.includes(d));
+      if (invalidDistance) {
+        toast({
+          variant: "destructive",
+          title: "Distancia inválida",
+          description: "Solo puedes generar categorías con distancias definidas en la carrera.",
+        });
         return;
       }
       await bulkAddCategories(values, raceId);
@@ -487,10 +513,11 @@ export function CategoryManager({
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="5k">5k</SelectItem>
-                        <SelectItem value="10k">10k</SelectItem>
-                        <SelectItem value="21k">21k</SelectItem>
-                        <SelectItem value="42k">42k</SelectItem>
+                      {allowedDistances.map((distance) => (
+                        <SelectItem key={distance} value={distance}>
+                          {distance.toUpperCase()}
+                        </SelectItem>
+                      ))}
                       </SelectContent>
                     </Select>
                     <FormMessage />

@@ -190,7 +190,7 @@ export function CompetitorsManager({
   activeRace?: Race | null;
 }) {
   const { toast } = useToast();
-  const { role, raceDate, ageCalculationMethod } = useContext(AppContext);
+  const { role, raceDate, ageCalculationMethod, setRaceDate, setAgeCalculationMethod } = useContext(AppContext);
   const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
   const [editingParticipant, setEditingParticipant] = useState<Participant | null>(null);
@@ -228,6 +228,15 @@ export function CompetitorsManager({
   const [clearRange, setClearRange] = useState<{ fromBib: string; toBib: string }>({ fromBib: "", toBib: "" });
   const [isClearingBibs, setIsClearingBibs] = useState(false);
 
+  useEffect(() => {
+    if (activeRace?.eventDate) {
+      setRaceDate(new Date(activeRace.eventDate));
+    }
+    if (activeRace?.ageCalculationMethod) {
+      setAgeCalculationMethod(activeRace.ageCalculationMethod);
+    }
+  }, [activeRace?.eventDate, activeRace?.ageCalculationMethod, setRaceDate, setAgeCalculationMethod]);
+
   const categoryMap = useMemo(() => {
     return categories.reduce((acc, category) => {
       acc[category.id] = category.name;
@@ -257,6 +266,7 @@ export function CompetitorsManager({
   }
 
   const raceName = activeRace?.name ?? "Carrera";
+  const registrationsOpen = activeRace?.registrationsOpen ?? true;
 
   const orderedCategories = useMemo(() => {
     return [...categories].sort((a, b) => a.name.localeCompare(b.name));
@@ -945,13 +955,18 @@ export function CompetitorsManager({
       <p className="mb-2 text-sm text-muted-foreground">
         Gestionando competidores de <span className="font-semibold text-foreground">{raceName}</span>
       </p>
+      {!registrationsOpen && (
+        <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          Inscripciones cerradas: no se podrán agregar nuevos corredores hasta reabrirlas en la configuración de la carrera.
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2 mb-4">
         {isAdmin && (
           <>
-            <Button onClick={() => handleOpenDialog()}>
+            <Button onClick={() => handleOpenDialog()} disabled={!registrationsOpen}>
               <Plus className="mr-2 h-4 w-4" /> Añadir Participante
             </Button>
-            <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
+            <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={!registrationsOpen}>
               <Upload className="mr-2 h-4 w-4" /> Importar
             </Button>
             <input
@@ -960,6 +975,7 @@ export function CompetitorsManager({
               onChange={handleFileChange}
               className="hidden"
               accept=".xlsx, .xls, .csv"
+              disabled={!registrationsOpen}
             />
             <Button
               variant="outline"

@@ -16,10 +16,18 @@ import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { Trash2, Plus, Pencil } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+
+const distanceOptionPreset = ["5k", "10k", "21k", "42k"] as const;
 
 const raceSchema = z.object({
   name: z.string().min(3, "El nombre debe tener al menos 3 caracteres"),
   eventDate: z.string().min(1, "Define una fecha"),
+  distances: z.array(z.string()).min(1, "Agrega al menos una distancia"),
+  ageCalculationMethod: z.enum(["raceDay", "endOfYear"]),
+  registrationsOpen: z.boolean().default(true),
 });
 
 type RaceFormValues = z.infer<typeof raceSchema>;
@@ -29,9 +37,17 @@ export function RacesManager({ races }: { races: Race[] }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRace, setEditingRace] = useState<Race | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [customDistance, setCustomDistance] = useState("");
+  const [customUnit, setCustomUnit] = useState<"k" | "m">("k");
   const form = useForm<RaceFormValues>({
     resolver: zodResolver(raceSchema),
-    defaultValues: { name: "", eventDate: new Date().toISOString().split("T")[0] },
+    defaultValues: {
+      name: "",
+      eventDate: new Date().toISOString().split("T")[0],
+      distances: [...distanceOptionPreset],
+      ageCalculationMethod: "raceDay",
+      registrationsOpen: true,
+    },
   });
 
   const sortedRaces = useMemo(
@@ -42,12 +58,46 @@ export function RacesManager({ races }: { races: Race[] }) {
   const handleOpen = (race?: Race) => {
     if (race) {
       setEditingRace(race);
-      form.reset({ name: race.name, eventDate: race.eventDate });
+      form.reset({
+        name: race.name,
+        eventDate: race.eventDate,
+        distances: race.distances ?? [...distanceOptionPreset],
+        ageCalculationMethod: race.ageCalculationMethod ?? "raceDay",
+        registrationsOpen: race.registrationsOpen ?? true,
+      });
     } else {
       setEditingRace(null);
-      form.reset({ name: "", eventDate: new Date().toISOString().split("T")[0] });
+      form.reset({
+        name: "",
+        eventDate: new Date().toISOString().split("T")[0],
+        distances: [...distanceOptionPreset],
+        ageCalculationMethod: "raceDay",
+        registrationsOpen: true,
+      });
     }
+    setCustomDistance("");
+    setCustomUnit("k");
     setDialogOpen(true);
+  };
+
+  const toggleDistance = (distance: string) => {
+    const current = form.getValues("distances");
+    if (current.includes(distance)) {
+      form.setValue(
+        "distances",
+        current.filter((d) => d !== distance)
+      );
+    } else {
+      form.setValue("distances", [...current, distance]);
+    }
+  };
+
+  const handleAddCustomDistance = () => {
+    const numeric = customDistance.trim();
+    if (!numeric) return;
+    const label = `${numeric}${customUnit}`;
+    toggleDistance(label);
+    setCustomDistance("");
   };
 
   const onSubmit = (values: RaceFormValues) => {
@@ -152,6 +202,61 @@ export function RacesManager({ races }: { races: Race[] }) {
               />
               <FormField
                 control={form.control}
+                name="distances"
+                render={() => (
+                  <FormItem>
+                    <FormLabel>Distancias</FormLabel>
+                    <div className="grid gap-2">
+                      <div className="flex flex-wrap gap-2">
+                        {distanceOptionPreset.map((distance) => (
+                          <Badge
+                            key={distance}
+                            variant={form.getValues("distances").includes(distance) ? "default" : "outline"}
+                            className="cursor-pointer"
+                            onClick={() => toggleDistance(distance)}
+                          >
+                            {distance}
+                          </Badge>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          placeholder="Otra distancia"
+                          value={customDistance}
+                          onChange={(e) => setCustomDistance(e.target.value)}
+                        />
+                        <Select value={customUnit} onValueChange={(value) => setCustomUnit(value as "k" | "m") }>
+                          <SelectTrigger className="w-24">
+                            <SelectValue placeholder="Unidad" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="k">K</SelectItem>
+                            <SelectItem value="m">M</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Button type="button" variant="outline" onClick={handleAddCustomDistance}>
+                          Agregar
+                        </Button>
+                      </div>
+                      {form.getValues("distances").length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {form.getValues("distances").map((distance) => (
+                            <Badge key={distance} variant="secondary" className="flex items-center gap-1">
+                              {distance.toUpperCase()}
+                              <button type="button" onClick={() => toggleDistance(distance)} className="text-muted-foreground">
+                                ×
+                              </button>
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
                 name="eventDate"
                 render={({ field }) => (
                   <FormItem>
@@ -160,6 +265,42 @@ export function RacesManager({ races }: { races: Race[] }) {
                       <Input type="date" {...field} />
                     </FormControl>
                     <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="ageCalculationMethod"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Determinación de edad</FormLabel>
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Método" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="raceDay">Al día de la carrera</SelectItem>
+                        <SelectItem value="endOfYear">A fin de año</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="registrationsOpen"
+                render={({ field }) => (
+                  <FormItem className="flex items-center justify-between rounded-md border p-3">
+                    <div>
+                      <FormLabel>Inscripciones</FormLabel>
+                      <DialogDescription className="mt-1 text-sm text-muted-foreground">
+                        Abiertas permiten cargar nuevos corredores. Al cerrarlas, no se podrán agregar participantes.
+                      </DialogDescription>
+                    </div>
+                    <FormControl>
+                      <Switch checked={field.value} onCheckedChange={field.onChange} />
+                    </FormControl>
                   </FormItem>
                 )}
               />
