@@ -18,32 +18,34 @@ import type { Participant, Category, CategoryInput, ParticipantFirestoreData, Ra
 
 export async function getParticipants(raceId?: string | null): Promise<Participant[]> {
     const participantsCol = collection(db, "participants");
-    const constraints = [orderBy("bibNumber")];
-    if (raceId) {
-        constraints.unshift(where("raceId", "==", raceId));
-    }
-    const q = query(participantsCol, ...constraints);
+    const constraints = raceId ? [where("raceId", "==", raceId)] : [];
+    const q = constraints.length ? query(participantsCol, ...constraints) : query(participantsCol);
     const participantSnapshot = await getDocs(q);
-    const participantList = participantSnapshot.docs.map(doc => {
-        const data = doc.data() as ParticipantFirestoreData;
-        return {
-            id: doc.id,
-            ...data,
-            isSpecial: data.isSpecial ?? false,
-        } satisfies Participant;
-    });
+    const participantList = participantSnapshot.docs
+        .map(doc => {
+            const data = doc.data() as ParticipantFirestoreData;
+            return {
+                id: doc.id,
+                ...data,
+                isSpecial: data.isSpecial ?? false,
+            } satisfies Participant;
+        })
+        .sort((a, b) => {
+            const aBib = a.bibNumber ?? Number.MAX_SAFE_INTEGER;
+            const bBib = b.bibNumber ?? Number.MAX_SAFE_INTEGER;
+            return aBib - bBib;
+        });
     return participantList;
 }
 
 export async function getCategories(raceId?: string | null): Promise<Category[]> {
     const categoriesCol = collection(db, "categories");
-    const constraints = [orderBy("name")];
-    if (raceId) {
-        constraints.unshift(where("raceId", "==", raceId));
-    }
-    const q = query(categoriesCol, ...constraints);
+    const constraints = raceId ? [where("raceId", "==", raceId)] : [];
+    const q = constraints.length ? query(categoriesCol, ...constraints) : query(categoriesCol);
     const categorySnapshot = await getDocs(q);
-    const categoryList = categorySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Category));
+    const categoryList = categorySnapshot.docs
+        .map(doc => ({ id: doc.id, ...(doc.data() as Omit<Category, "id">) } as Category))
+        .sort((a, b) => a.name.localeCompare(b.name, "es", { sensitivity: "base" }));
     return categoryList;
 }
 
