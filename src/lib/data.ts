@@ -1,5 +1,5 @@
 
-"use server";
+"server-only";
 
 import { db } from "./firebase";
 import {
