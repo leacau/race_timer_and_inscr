@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import * as z from "zod";
 import { useForm } from "react-hook-form";
@@ -158,7 +159,11 @@ export function RacesManager({ races }: { races: Race[] }) {
               <TableBody>
                 {sortedRaces.map((race) => (
                   <TableRow key={race.id}>
-                    <TableCell className="font-medium">{race.name}</TableCell>
+                    <TableCell className="font-medium">
+                      <Link href={`/races/${race.id}`} className="text-foreground underline-offset-4 hover:underline">
+                        {race.name}
+                      </Link>
+                    </TableCell>
                     <TableCell>{race.eventDate ? format(new Date(race.eventDate), "PPP", { locale: es }) : "Sin fecha"}</TableCell>
                     <TableCell className="flex gap-2">
                       <Button variant="secondary" size="sm" asChild>

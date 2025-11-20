@@ -4,6 +4,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TimingDashboard } from "@/components/timing-dashboard";
 import { CompetitorsManager } from "@/components/competitors-manager";
 import { CategoryManager } from "@/components/category-manager";
+import { RegistrationDesk } from "@/components/registration-desk";
 import { getCategories, getParticipants, getRaceById } from "@/lib/data";
 
 export default async function RaceDetailPage({ params }: { params: Promise<{ raceId: string }> }) {
@@ -23,10 +24,14 @@ export default async function RaceDetailPage({ params }: { params: Promise<{ rac
       </div>
       <Tabs defaultValue="timing" className="space-y-4">
         <TabsList>
+          <TabsTrigger value="registration">Inscripciones</TabsTrigger>
           <TabsTrigger value="participants">Participantes</TabsTrigger>
           <TabsTrigger value="categories">Categorías</TabsTrigger>
           <TabsTrigger value="timing">Cronometraje</TabsTrigger>
         </TabsList>
+        <TabsContent value="registration">
+          <RegistrationDesk participants={participants} race={race} />
+        </TabsContent>
         <TabsContent value="participants">
           <CompetitorsManager participants={participants} categories={categories} raceId={raceId} activeRace={race} />
         </TabsContent>
