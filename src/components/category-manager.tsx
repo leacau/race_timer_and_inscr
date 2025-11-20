@@ -130,6 +130,17 @@ export function CategoryManager({
     [activeRace?.distances]
   );
 
+  const bulkForm = useForm<BulkCategoryFormValues>({
+    resolver: zodResolver(bulkCategorySchema),
+    defaultValues: {
+      ageRanges: [{ min: 18, max: 29 }],
+      distances: allowedDistances,
+      genders: [],
+      nameTemplate: "[[distancia]]K [[genero]] DE [[edad min]] A [[edad max]] AÑOS",
+      genderFormat: "long",
+    },
+  });
+
   const form = useForm<CategoryFormValues>({
     resolver: zodResolver(categorySchema),
     defaultValues: {
@@ -151,17 +162,6 @@ export function CategoryManager({
       bulkForm.setValue("distances", allowedDistances);
     }
   }, [raceId, form, bulkForm, allowedDistances]);
-
-  const bulkForm = useForm<BulkCategoryFormValues>({
-    resolver: zodResolver(bulkCategorySchema),
-    defaultValues: {
-      ageRanges: [{ min: 18, max: 29 }],
-      distances: allowedDistances,
-      genders: [],
-      nameTemplate: "[[distancia]]K [[genero]] DE [[edad min]] A [[edad max]] AÑOS",
-      genderFormat: "long",
-    },
-  });
 
   const { fields, append, remove } = useFieldArray({
     control: bulkForm.control,
@@ -196,7 +196,7 @@ export function CategoryManager({
         minAge: 0,
         maxAge: 99,
         gender: "Any",
-        distance: "5k",
+        distance: allowedDistances[0] ?? "",
       });
     }
     setOpen(true);
