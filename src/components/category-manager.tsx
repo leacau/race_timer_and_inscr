@@ -109,11 +109,11 @@ type BulkCategoryFormValues = z.infer<typeof bulkCategorySchema>;
 
 
 export function CategoryManager({
-  initialCategories,
+  initialCategories = [],
   raceId,
   activeRace,
 }: {
-  initialCategories: Category[];
+  initialCategories?: Category[];
   raceId: string | null;
   activeRace?: Race | null;
 }) {

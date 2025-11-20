@@ -31,7 +31,7 @@ export default async function RaceDetailPage({ params }: { params: Promise<{ rac
           <CompetitorsManager participants={participants} categories={categories} raceId={raceId} activeRace={race} />
         </TabsContent>
         <TabsContent value="categories">
-          <CategoryManager categories={categories} raceId={raceId} activeRace={race} />
+          <CategoryManager initialCategories={categories} raceId={raceId} activeRace={race} />
         </TabsContent>
         <TabsContent value="timing">
           <TimingDashboard raceId={raceId} activeRace={race} participants={participants} categories={categories} />
