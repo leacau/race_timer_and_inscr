@@ -125,22 +125,6 @@ export function CategoryManager({
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [isSelectAll, setIsSelectAll] = useState(false);
 
-  if (!raceId) {
-    return (
-      <Card className="border-dashed">
-        <CardHeader>
-          <CardTitle>Selecciona una carrera</CardTitle>
-          <CardDescription>Define una carrera para crear o editar categorías.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Button asChild>
-            <Link href="/races">Administrar carreras</Link>
-          </Button>
-        </CardContent>
-      </Card>
-    );
-  }
-
   const allowedDistances = useMemo(
     () => (activeRace?.distances?.length ? activeRace.distances : ["5k", "10k", "21k", "42k"]),
     [activeRace?.distances]
@@ -183,6 +167,22 @@ export function CategoryManager({
     control: bulkForm.control,
     name: "ageRanges"
   });
+
+  if (!raceId) {
+    return (
+      <Card className="border-dashed">
+        <CardHeader>
+          <CardTitle>Selecciona una carrera</CardTitle>
+          <CardDescription>Define una carrera para crear o editar categorías.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button asChild>
+            <Link href="/races">Administrar carreras</Link>
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
 
   const handleOpenDialog = (category?: Category) => {
     if (category) {

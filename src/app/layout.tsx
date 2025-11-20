@@ -3,7 +3,6 @@ import "./globals.css";
 import { AppShell } from "@/components/app-shell";
 import { AppProvider } from "@/context/app-context";
 import { cn } from "@/lib/utils";
-import { SpeedInsights } from "@vercel/speed-insights/next";
 import { SidebarProvider } from "@/components/ui/sidebar";
 
 export const metadata: Metadata = {
@@ -28,11 +27,10 @@ export default function RootLayout({
       </head>
       <body className={cn("font-body antialiased", "min-h-screen bg-background font-sans")}>
         <AppProvider>
-            <SidebarProvider>
-              <AppShell>{children}</AppShell>
-            </SidebarProvider>
+          <SidebarProvider>
+            <AppShell>{children}</AppShell>
+          </SidebarProvider>
         </AppProvider>
-        <SpeedInsights />
       </body>
     </html>
   );
