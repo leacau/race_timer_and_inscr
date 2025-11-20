@@ -18,6 +18,13 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Form,
   FormControl,
   FormField,
@@ -52,6 +59,8 @@ export function RegistrationDesk({
   const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Participant | null>(null);
+  const [showModal, setShowModal] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const form = useForm<RegistrationFormValues>({
@@ -85,9 +94,9 @@ export function RegistrationDesk({
     });
   }, [participants, search]);
 
-  const selected = useMemo(
-    () => filtered.find((p) => p.id === selectedId) ?? filtered[0],
-    [filtered, selectedId]
+  const highlightedId = useMemo(
+    () => selectedId ?? (selected ? selected.id : null),
+    [selected, selectedId]
   );
 
   const handleSubmit = (values: RegistrationFormValues) => {
@@ -150,9 +159,13 @@ export function RegistrationDesk({
               {filtered.map((participant) => (
                 <button
                   key={participant.id}
-                  onClick={() => setSelectedId(participant.id)}
+                  onClick={() => {
+                    setSelectedId(participant.id);
+                    setSelected(participant);
+                    setShowModal(true);
+                  }}
                   className={`flex w-full items-start justify-between gap-4 p-4 text-left hover:bg-accent ${
-                    selected?.id === participant.id ? "bg-accent" : ""
+                    highlightedId === participant.id ? "bg-accent" : ""
                   }`}
                 >
                   <div>
@@ -167,13 +180,30 @@ export function RegistrationDesk({
               ))}
             </div>
           </ScrollArea>
+        </CardContent>
+      </Card>
 
+      <Dialog open={showModal} onOpenChange={setShowModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {selected ? `${selected.surname}, ${selected.name}` : "Ficha"}
+            </DialogTitle>
+            <DialogDescription>Detalle del participante.</DialogDescription>
+          </DialogHeader>
           {selected && (
-            <div className="space-y-2 rounded-md border p-4">
+            <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="text-sm text-muted-foreground">Ficha seleccionada</p>
-                  <p className="text-lg font-semibold">{selected.surname}, {selected.name}</p>
+                <div className="flex flex-col gap-1 text-sm text-muted-foreground">
+                  <div className="font-semibold text-foreground">DNI {selected.dni}</div>
+                  <div>{selected.distance}</div>
+                  <div>
+                    {selected.gender === "Male"
+                      ? "Masculino"
+                      : selected.gender === "Female"
+                        ? "Femenino"
+                        : "Otro"}
+                  </div>
                 </div>
                 <div className="flex gap-2 text-sm text-muted-foreground">
                   {selected.bibNumber && <Badge variant="outline">Dorsal {selected.bibNumber}</Badge>}
@@ -182,18 +212,6 @@ export function RegistrationDesk({
               </div>
               <Separator />
               <div className="grid grid-cols-2 gap-2 text-sm text-muted-foreground sm:grid-cols-3">
-                <div>
-                  <Label className="text-xs uppercase">DNI</Label>
-                  <p className="text-foreground">{selected.dni}</p>
-                </div>
-                <div>
-                  <Label className="text-xs uppercase">Distancia</Label>
-                  <p className="text-foreground">{selected.distance}</p>
-                </div>
-                <div>
-                  <Label className="text-xs uppercase">Género</Label>
-                  <p className="text-foreground">{selected.gender === "Male" ? "Masculino" : selected.gender === "Female" ? "Femenino" : "Otro"}</p>
-                </div>
                 <div>
                   <Label className="text-xs uppercase">Nacimiento</Label>
                   <p className="text-foreground">{selected.birthDate}</p>
@@ -211,8 +229,8 @@ export function RegistrationDesk({
               </div>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </DialogContent>
+      </Dialog>
 
       <Card className="h-full">
         <CardHeader>
