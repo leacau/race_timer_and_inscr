@@ -185,6 +185,7 @@ model Team {
   category  Category? @relation(fields: [categoryId], references: [id])
   categoryId String?
   participants Participant[]
+  registrations Registration[]
 
   @@index([raceId])
 }
