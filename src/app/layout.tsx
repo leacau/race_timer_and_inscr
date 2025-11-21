@@ -5,6 +5,7 @@ import { AppProvider } from "@/context/app-context";
 import { cn } from "@/lib/utils";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { SidebarProvider } from "@/components/ui/sidebar";
+import { Suspense } from "react";
 
 export const metadata: Metadata = {
   title: "LapTimer",
@@ -29,7 +30,9 @@ export default function RootLayout({
       <body className={cn("font-body antialiased", "min-h-screen bg-background font-sans")}>
         <AppProvider>
             <SidebarProvider>
-              <AppShell>{children}</AppShell>
+              <Suspense>
+                <AppShell>{children}</AppShell>
+              </Suspense>
             </SidebarProvider>
         </AppProvider>
         <SpeedInsights />
