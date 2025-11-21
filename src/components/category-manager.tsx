@@ -234,7 +234,7 @@ export function CategoryManager({ initialCategories }: { initialCategories: Cate
     }
   };
 
-  const isAdmin = role === 'admin';
+  const isAdmin = role === 'admin' || role === 'owner';
   const distancesOptions = ["5k", "10k", "21k", "42k"];
   const gendersOptions = [
     { id: "Male", label: "Masculino" },

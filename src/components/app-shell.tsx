@@ -24,7 +24,7 @@ import {
   LayoutGrid,
   CalendarIcon,
 } from "lucide-react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { RaceTimerProLogo } from "./icons";
 import { Button } from "./ui/button";
@@ -60,7 +60,7 @@ const navItems = [
 ];
 
 function AppHeader() {
-  const { role, setRole, raceDate, setRaceDate, ageCalculationMethod, setAgeCalculationMethod } = React.useContext(AppContext);
+  const { role, raceDate, setRaceDate, ageCalculationMethod, setAgeCalculationMethod, user, logout } = React.useContext(AppContext);
   const { isMobile } = useSidebar();
 
   const pageTitles: { [key: string]: string } = {
@@ -126,44 +126,29 @@ function AppHeader() {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <div className="flex items-center gap-2">
-          <Label htmlFor="role-select" className="text-sm font-medium">
-            Rol
-          </Label>
-          <Select value={role} onValueChange={(value) => setRole(value as typeof role)}>
-            <SelectTrigger id="role-select" className="w-[140px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="owner">Owner</SelectItem>
-              <SelectItem value="admin">Administrador</SelectItem>
-              <SelectItem value="loader">Cargador</SelectItem>
-              <SelectItem value="user">Usuario</SelectItem>
-            </SelectContent>
-          </Select>
+        <div className="flex items-center gap-3">
+          <div className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground">
+            Rol: {role === 'owner' ? 'Owner' : role === 'admin' ? 'Administrador' : role === 'loader' ? 'Cargador' : 'Usuario'}
+          </div>
+          <Separator orientation="vertical" className="h-8" />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="rounded-full">
+                <Avatar>
+                  <AvatarFallback>{user?.email?.[0]?.toUpperCase() ?? 'U'}</AvatarFallback>
+                </Avatar>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>{user?.email ?? 'Invitado'}</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={logout}>
+                <LogOut className="mr-2 h-4 w-4" />
+                <span>Cerrar Sesión</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
-        <Separator orientation="vertical" className="h-8" />
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="rounded-full">
-              <Avatar>
-                <AvatarFallback>U</AvatarFallback>
-              </Avatar>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuLabel>Mi Cuenta</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem>
-              <Settings className="mr-2 h-4 w-4" />
-              <span>Configuración</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem>
-              <LogOut className="mr-2 h-4 w-4" />
-              <span>Cerrar Sesión</span>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
       </div>
     </header>
   );
@@ -171,16 +156,55 @@ function AppHeader() {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [isClient, setIsClient] = React.useState(false);
+  const { role, authLoading, user } = React.useContext(AppContext);
 
   React.useEffect(() => {
     setIsClient(true);
   }, []);
 
+  React.useEffect(() => {
+    if (!isClient || authLoading) return;
+
+    if (!user && pathname !== "/auth") {
+      router.replace("/auth");
+      return;
+    }
+
+    if (!user) return;
+
+    const allowedPaths: Record<string, string[]> = {
+      owner: ["/", "/categories", "/live"],
+      admin: ["/", "/categories", "/live"],
+      loader: ["/", "/live"],
+      user: ["/live"],
+    };
+
+    const path = pathname;
+    const isAllowed = allowedPaths[role]?.some((allowed) => path.startsWith(allowed));
+    if (!isAllowed) {
+      const fallback = allowedPaths[role]?.[0] ?? "/live";
+      router.replace(fallback);
+    }
+  }, [isClient, authLoading, pathname, role, user, router]);
+
   if (!isClient) {
     return null; // or a loading skeleton
   }
-  
+
+  const isStandalone = searchParams?.get("standalone") === "1";
+
+  if (isStandalone) {
+    return (
+      <>
+        <main className="min-h-screen bg-background">{children}</main>
+        <Toaster />
+      </>
+    );
+  }
+
   return (
       <>
         <Sidebar>

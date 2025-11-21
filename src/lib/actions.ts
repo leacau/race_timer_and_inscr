@@ -14,6 +14,7 @@ import {
   updateParticipantTime as dbUpdateParticipantTime,
   bulkDeleteCategories as dbBulkDeleteCategories,
   importParticipants as dbImportParticipants,
+  getParticipantById,
 } from "./data";
 import type { Participant, Category, ParticipantInput, CategoryInput, AgeCalculationMethod } from "./types";
 import { calculateAge, generateChipNumber } from "./utils";
@@ -52,6 +53,33 @@ export async function updateParticipant(participant: Participant & { raceDate: D
     const categoryId = assignCategory(pData, categories, raceDate, ageCalculationMethod);
     await dbUpdateParticipant({ ...pData, categoryId });
     revalidatePath("/");
+}
+
+export async function transferParticipant(
+  sourceId: string,
+  participantData: ParticipantInput & { raceDate: Date; ageCalculationMethod: AgeCalculationMethod }
+) {
+    const source = await getParticipantById(sourceId);
+    const { raceDate, ageCalculationMethod, ...pData } = participantData;
+    const categories = await dbGetCategories();
+    const categoryId = assignCategory(pData, categories, raceDate, ageCalculationMethod);
+    const chipNumber = source?.chipNumber ?? generateChipNumber(pData.bibNumber);
+    const bibNumber = source?.bibNumber ?? pData.bibNumber;
+
+    const newParticipant = await dbAddParticipant({
+        ...pData,
+        bibNumber,
+        chipNumber,
+        categoryId,
+        transferFromId: sourceId,
+    });
+
+    if (source) {
+        await dbUpdateParticipant({ ...source, transferToId: newParticipant.id });
+    }
+
+    revalidatePath("/");
+    return newParticipant.id;
 }
 
 export async function deleteParticipant(id: string) {

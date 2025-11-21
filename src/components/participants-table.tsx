@@ -51,7 +51,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { MoreVertical, Play, Square, Edit, Trash2, Plus, Upload } from "lucide-react";
+import { MoreVertical, Play, Square, Edit, Trash2, Plus, Upload, ArrowRightLeft, ClipboardList } from "lucide-react";
 import type { Participant, Category } from "@/lib/types";
 import { cn, calculateAge, formatElapsedTime } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -59,7 +59,7 @@ import { AppContext } from "@/context/app-context";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { addParticipant, updateParticipant, deleteParticipant, updateParticipantTime, importParticipants } from "@/lib/actions";
+import { addParticipant, updateParticipant, deleteParticipant, updateParticipantTime, importParticipants, transferParticipant } from "@/lib/actions";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 type TimerState = {
@@ -142,6 +142,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
   const [timers, setTimers] = useState<TimerState>({});
   const [open, setOpen] = useState(false);
   const [editingParticipant, setEditingParticipant] = useState<Participant | null>(null);
+  const [transferSource, setTransferSource] = useState<Participant | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [importState, setImportState] = useState<ImportState>({ file: null, headers: [], data: [], mappings: {} });
@@ -163,6 +164,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
   });
 
   const handleOpenDialog = (participant?: Participant) => {
+    setTransferSource(null);
     if (participant) {
       setEditingParticipant(participant);
       form.reset({
@@ -178,12 +180,32 @@ export function ParticipantsTable({ participants, categories }: { participants: 
     setOpen(true);
   };
 
+  const handleOpenTransfer = (participant: Participant) => {
+    setTransferSource(participant);
+    setEditingParticipant(null);
+    form.reset({
+      name: "",
+      surname: "",
+      dni: "",
+      birthDate: "",
+      gender: participant.gender,
+      distance: participant.distance,
+      bibNumber: participant.bibNumber,
+      kitDelivered: false,
+    });
+    setOpen(true);
+  };
+
   const kitLocked = !!(editingParticipant?.kitDelivered && form.watch("kitDelivered"));
+  const isTransfer = !!transferSource;
 
   const onSubmit = async (values: ParticipantFormValues) => {
     try {
       const payload = { ...values, raceDate: raceDate, ageCalculationMethod };
-      if (editingParticipant) {
+      if (transferSource) {
+        await transferParticipant(transferSource.id, payload);
+        toast({ title: "Cesión creada", description: "El dorsal y chip fueron asignados al nuevo corredor." });
+      } else if (editingParticipant) {
         await updateParticipant({ ...editingParticipant, ...payload });
         toast({ title: "Participante Actualizado", description: "El participante ha sido actualizado correctamente." });
       } else {
@@ -408,7 +430,13 @@ export function ParticipantsTable({ participants, categories }: { participants: 
     return (
       <TableRow key={p.id}>
         <TableCell className="font-medium">{p.bibNumber}</TableCell>
-        <TableCell className="font-medium">{`${p.name} ${p.surname}`}</TableCell>
+        <TableCell className="font-medium">
+          <div className="flex flex-col">
+            <span>{`${p.name} ${p.surname}`}</span>
+            {p.transferFromId && <span className="text-xs text-muted-foreground">Recibió lugar de otro corredor</span>}
+            {p.transferToId && <span className="text-xs text-muted-foreground">Cedió su lugar</span>}
+          </div>
+        </TableCell>
         <TableCell className="hidden lg:table-cell">{age}</TableCell>
         <TableCell className="hidden md:table-cell">
           {p.categoryId ? (
@@ -446,11 +474,19 @@ export function ParticipantsTable({ participants, categories }: { participants: 
                   <DropdownMenuItem onClick={() => handleOpenDialog(p)}>
                     <Edit className="mr-2 h-4 w-4" /> Editar
                   </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleOpenTransfer(p)}>
+                    <ArrowRightLeft className="mr-2 h-4 w-4" /> Ceder lugar
+                  </DropdownMenuItem>
                   <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(p.id)}>
                     <Trash2 className="mr-2 h-4 w-4" /> Eliminar
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+            )}
+            {!canEdit && canManageKits && (
+              <Button variant="outline" size="sm" onClick={() => handleOpenDialog(p)}>
+                <ClipboardList className="mr-2 h-4 w-4" /> Kit
+              </Button>
             )}
           </div>
         </TableCell>
@@ -472,6 +508,8 @@ export function ParticipantsTable({ participants, categories }: { participants: 
               <p className="text-sm text-muted-foreground">
                 {age} años | {p.distance} | {p.gender === 'Male' ? 'Masculino' : p.gender === 'Female' ? 'Femenino' : 'Otro'}
               </p>
+              {p.transferFromId && <p className="text-xs text-muted-foreground">Recibió el lugar de otro corredor</p>}
+              {p.transferToId && <p className="text-xs text-muted-foreground">Cedido a otro corredor</p>}
               {p.categoryId && <Badge variant="secondary" className="mt-1">{categoryMap[p.categoryId] || 'N/A'}</Badge>}
             </div>
             {canEdit && (
@@ -483,6 +521,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem onClick={() => handleOpenDialog(p)}><Edit className="mr-2 h-4 w-4" /> Editar</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleOpenTransfer(p)}><ArrowRightLeft className="mr-2 h-4 w-4" /> Ceder lugar</DropdownMenuItem>
                   <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(p.id)}><Trash2 className="mr-2 h-4 w-4" /> Eliminar</DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -566,16 +605,27 @@ export function ParticipantsTable({ participants, categories }: { participants: 
       )}
 
       {/* Add/Edit Participant Dialog */}
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={(value) => { if (!value) { setEditingParticipant(null); setTransferSource(null); } setOpen(value); }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{editingParticipant ? "Editar Participante" : "Añadir Nuevo Participante"}</DialogTitle>
-            <DialogDescription>{editingParticipant ? "Actualizar detalles del participante." : "Añadir un nuevo participante a la carrera."}</DialogDescription>
+            <DialogTitle>{transferSource ? "Ceder lugar" : editingParticipant ? "Editar Participante" : "Añadir Nuevo Participante"}</DialogTitle>
+            <DialogDescription>
+              {transferSource
+                ? `El dorsal ${transferSource.bibNumber} y el chip se asignarán al nuevo corredor, manteniendo la relación con ${transferSource.name}.`
+                : editingParticipant
+                ? "Actualizar detalles del participante."
+                : "Añadir un nuevo participante a la carrera."}
+            </DialogDescription>
           </DialogHeader>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+              {transferSource && (
+                <div className="rounded-md border border-secondary bg-secondary/50 px-3 py-2 text-sm text-secondary-foreground">
+                  Cesión desde #{transferSource.bibNumber} - {transferSource.name} {transferSource.surname}
+                </div>
+              )}
               <FormField control={form.control} name="bibNumber" render={({ field }) => (
-                <FormItem><FormLabel>Dorsal</FormLabel><FormControl><Input {...field} disabled={!canEdit || kitLocked} /></FormControl><FormMessage /></FormItem>
+                <FormItem><FormLabel>Dorsal</FormLabel><FormControl><Input {...field} disabled={!canEdit || kitLocked || isTransfer} /></FormControl><FormMessage /></FormItem>
               )} />
               <div className="grid grid-cols-2 gap-4">
                 <FormField control={form.control} name="name" render={({ field }) => (
@@ -654,7 +704,9 @@ export function ParticipantsTable({ participants, categories }: { participants: 
               />
               <DialogFooter>
                 <DialogClose asChild><Button type="button" variant="secondary">Cancelar</Button></DialogClose>
-                <Button type="submit" disabled={!canManageKits}>Guardar</Button>
+                <Button type="submit" disabled={transferSource ? !canEdit : !canManageKits}>
+                  {transferSource ? "Confirmar cesión" : "Guardar"}
+                </Button>
               </DialogFooter>
             </form>
           </Form>

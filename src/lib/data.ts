@@ -47,6 +47,13 @@ export async function getCategories(): Promise<Category[]> {
     }
 }
 
+export async function getParticipantById(id: string): Promise<Participant | null> {
+    const ref = doc(db, "participants", id);
+    const snapshot = await getDoc(ref);
+    if (!snapshot.exists()) return null;
+    return { id: snapshot.id, ...snapshot.data() } as Participant;
+}
+
 export async function addParticipant(participant: ParticipantInput & { categoryId?: string, chipNumber: string }): Promise<Participant> {
     const { id, ...dataToSave } = participant as any; // Firestore fails if id is present
     const sanitizedData = removeUndefinedFields(dataToSave);
