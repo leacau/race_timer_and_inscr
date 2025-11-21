@@ -50,6 +50,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { MoreVertical, Play, Square, Edit, Trash2, Plus, Upload } from "lucide-react";
 import type { Participant, Category } from "@/lib/types";
 import { cn, calculateAge, formatElapsedTime } from "@/lib/utils";
@@ -83,6 +84,7 @@ const participantSchema = z.object({
   city: z.string().optional(),
   province: z.string().optional(),
   country: z.string().optional(),
+  kitDelivered: z.boolean().optional(),
 }).refine(data => (data.birthDate && data.birthDate.trim() !== '') || (data.age !== undefined && data.age >= 0), {
   message: "Debe proporcionar la fecha de nacimiento o la edad.",
   path: ["birthDate"],
@@ -145,6 +147,9 @@ export function ParticipantsTable({ participants, categories }: { participants: 
   const [importState, setImportState] = useState<ImportState>({ file: null, headers: [], data: [], mappings: {} });
   const [isImportMappingOpen, setIsImportMappingOpen] = useState(false);
 
+  const canEdit = role === 'owner' || role === 'admin';
+  const canManageKits = canEdit || role === 'loader';
+
   const categoryMap = useMemo(() => {
     return categories.reduce((acc, category) => {
       acc[category.id] = category.name;
@@ -154,7 +159,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
 
   const form = useForm<ParticipantFormValues>({
     resolver: zodResolver(participantSchema),
-    defaultValues: { name: "", surname: "", dni: "", birthDate: "", gender: "Male", distance: "5k", bibNumber: "" },
+    defaultValues: { name: "", surname: "", dni: "", birthDate: "", gender: "Male", distance: "5k", bibNumber: "", kitDelivered: false },
   });
 
   const handleOpenDialog = (participant?: Participant) => {
@@ -163,14 +168,17 @@ export function ParticipantsTable({ participants, categories }: { participants: 
       form.reset({
         ...participant,
         birthDate: participant.birthDate ? new Date(participant.birthDate).toISOString().split('T')[0] : '',
-        age: participant.age
+        age: participant.age,
+        kitDelivered: participant.kitDelivered ?? false,
       });
     } else {
       setEditingParticipant(null);
-      form.reset({ name: "", surname: "", dni: "", birthDate: "", gender: "Male", distance: "5k", bibNumber: "" });
+      form.reset({ name: "", surname: "", dni: "", birthDate: "", gender: "Male", distance: "5k", bibNumber: "", kitDelivered: false });
     }
     setOpen(true);
   };
+
+  const kitLocked = !!(editingParticipant?.kitDelivered && form.watch("kitDelivered"));
 
   const onSubmit = async (values: ParticipantFormValues) => {
     try {
@@ -392,8 +400,6 @@ export function ParticipantsTable({ participants, categories }: { participants: 
     };
   }, [participants]); // Only run on initial participants load
 
-  const isAdmin = role === 'admin';
-
   const renderParticipantRow = (p: Participant) => {
     const age = p.age ?? calculateAge(p.birthDate, raceDate, ageCalculationMethod);
     const timer = timers[p.id];
@@ -418,7 +424,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
         </TableCell>
         <TableCell className="text-right">
           <div className="flex items-center justify-end gap-2">
-            {isAdmin && (
+            {canEdit && (
               <Button
                 variant={isRunning ? "destructive" : "default"}
                 size="sm"
@@ -429,7 +435,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
                 {p.finishTime ? 'Finalizado' : (isRunning ? <><Square className="mr-2 h-4 w-4" />Parar</> : <><Play className="mr-2 h-4 w-4" />Iniciar</>)}
               </Button>
             )}
-            {isAdmin && (
+            {canEdit && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -468,7 +474,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
               </p>
               {p.categoryId && <Badge variant="secondary" className="mt-1">{categoryMap[p.categoryId] || 'N/A'}</Badge>}
             </div>
-            {isAdmin && (
+            {canEdit && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="icon" className="h-8 w-8 -mr-2 -mt-2">
@@ -486,7 +492,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
              <div className={cn("font-mono text-2xl", isRunning && "text-accent-foreground animate-pulse")}>
               {formatElapsedTime(timer?.elapsed ?? p.finishTime ? p.finishTime - (p.startTime ?? 0) : 0)}
             </div>
-            {isAdmin && (
+            {canEdit && (
               <Button 
                 variant={isRunning ? "destructive" : "default"} 
                 size="sm" 
@@ -506,7 +512,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 mb-4">
-        {isAdmin && (
+        {canEdit && (
           <>
             <Button onClick={() => handleOpenDialog()}>
               <Plus className="mr-2 h-4 w-4" /> Añadir Participante
@@ -569,32 +575,32 @@ export function ParticipantsTable({ participants, categories }: { participants: 
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
               <FormField control={form.control} name="bibNumber" render={({ field }) => (
-                <FormItem><FormLabel>Dorsal</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+                <FormItem><FormLabel>Dorsal</FormLabel><FormControl><Input {...field} disabled={!canEdit || kitLocked} /></FormControl><FormMessage /></FormItem>
               )} />
               <div className="grid grid-cols-2 gap-4">
                 <FormField control={form.control} name="name" render={({ field }) => (
-                  <FormItem><FormLabel>Nombre</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+                  <FormItem><FormLabel>Nombre</FormLabel><FormControl><Input {...field} disabled={!canEdit || kitLocked} /></FormControl><FormMessage /></FormItem>
                 )} />
                 <FormField control={form.control} name="surname" render={({ field }) => (
-                  <FormItem><FormLabel>Apellido</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+                  <FormItem><FormLabel>Apellido</FormLabel><FormControl><Input {...field} disabled={!canEdit || kitLocked} /></FormControl><FormMessage /></FormItem>
                 )} />
               </div>
               <FormField control={form.control} name="dni" render={({ field }) => (
-                <FormItem><FormLabel>DNI / ID</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+                <FormItem><FormLabel>DNI / ID</FormLabel><FormControl><Input {...field} disabled={!canEdit || kitLocked} /></FormControl><FormMessage /></FormItem>
               )} />
               
               <div className="grid grid-cols-2 gap-4">
                 <FormField control={form.control} name="birthDate" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Fecha de Nacimiento</FormLabel>
-                    <FormControl><Input type="date" {...field} /></FormControl>
+                    <FormControl><Input type="date" {...field} disabled={!canEdit || kitLocked} /></FormControl>
                     <FormMessage />
                   </FormItem>
                 )} />
                 <FormField control={form.control} name="age" render={({ field }) => (
                   <FormItem>
                     <FormLabel>o Edad</FormLabel>
-                    <FormControl><Input type="number" {...field} /></FormControl>
+                    <FormControl><Input type="number" {...field} disabled={!canEdit || kitLocked} /></FormControl>
                   </FormItem>
                 )} />
               </div>
@@ -603,7 +609,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
                 <FormField control={form.control} name="gender" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Género</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <Select onValueChange={field.onChange} defaultValue={field.value} disabled={!canEdit || kitLocked}>
                       <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
                       <SelectContent>
                         <SelectItem value="Male">Masculino</SelectItem>
@@ -617,7 +623,7 @@ export function ParticipantsTable({ participants, categories }: { participants: 
                 <FormField control={form.control} name="distance" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Distancia</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <Select onValueChange={field.onChange} defaultValue={field.value} disabled={!canEdit || kitLocked}>
                       <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
                       <SelectContent>
                         <SelectItem value="5k">5k</SelectItem><SelectItem value="10k">10k</SelectItem><SelectItem value="21k">21k</SelectItem><SelectItem value="42k">42k</SelectItem>
@@ -627,9 +633,28 @@ export function ParticipantsTable({ participants, categories }: { participants: 
                   </FormItem>
                 )} />
               </div>
+              <FormField
+                control={form.control}
+                name="kitDelivered"
+                render={({ field }) => (
+                  <FormItem className="flex items-center gap-3">
+                    <FormControl>
+                      <Checkbox
+                        checked={field.value}
+                        onCheckedChange={(checked) => field.onChange(!!checked)}
+                        disabled={!canManageKits || editingParticipant?.kitDelivered}
+                      />
+                    </FormControl>
+                    <div>
+                      <FormLabel className="!m-0">Kit Entregado</FormLabel>
+                      <p className="text-xs text-muted-foreground">Una vez marcado, el corredor ya no se podrá editar.</p>
+                    </div>
+                  </FormItem>
+                )}
+              />
               <DialogFooter>
                 <DialogClose asChild><Button type="button" variant="secondary">Cancelar</Button></DialogClose>
-                <Button type="submit">Guardar</Button>
+                <Button type="submit" disabled={!canManageKits}>Guardar</Button>
               </DialogFooter>
             </form>
           </Form>

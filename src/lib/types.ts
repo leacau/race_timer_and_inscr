@@ -17,6 +17,9 @@ export type Participant = {
   city?: string;
   province?: string;
   country?: string;
+  kitDelivered?: boolean;
+  transferFromId?: string;
+  transferToId?: string;
 };
 
 export type ParticipantInput = Omit<Participant, 'id' | 'categoryId' | 'startTime' | 'finishTime' | 'chipNumber'>;

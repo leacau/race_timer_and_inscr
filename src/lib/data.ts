@@ -2,12 +2,12 @@
 "use server";
 
 import { db } from "./firebase";
-import { 
-    collection, 
+import {
+    collection,
     getDocs,
-    addDoc, 
-    updateDoc, 
-    deleteDoc, 
+    addDoc,
+    updateDoc,
+    deleteDoc,
     doc,
     query,
     orderBy,
@@ -17,32 +17,48 @@ import {
 } from "firebase/firestore";
 import type { Participant, Category, ParticipantInput, CategoryInput } from "./types";
 
+const removeUndefinedFields = <T extends Record<string, any>>(obj: T) => {
+    return Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined)) as T;
+};
+
 export async function getParticipants(): Promise<Participant[]> {
-    const participantsCol = collection(db, "participants");
-    const q = query(participantsCol, orderBy("bibNumber"));
-    const participantSnapshot = await getDocs(q);
-    const participantList = participantSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Participant));
-    return participantList;
+    try {
+        const participantsCol = collection(db, "participants");
+        const q = query(participantsCol, orderBy("bibNumber"));
+        const participantSnapshot = await getDocs(q);
+        const participantList = participantSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Participant));
+        return participantList;
+    } catch (error) {
+        console.error("Failed to load participants from Firestore", error);
+        return [];
+    }
 }
 
 export async function getCategories(): Promise<Category[]> {
-    const categoriesCol = collection(db, "categories");
-    const q = query(categoriesCol, orderBy("name"));
-    const categorySnapshot = await getDocs(q);
-    const categoryList = categorySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Category));
-    return categoryList;
+    try {
+        const categoriesCol = collection(db, "categories");
+        const q = query(categoriesCol, orderBy("name"));
+        const categorySnapshot = await getDocs(q);
+        const categoryList = categorySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Category));
+        return categoryList;
+    } catch (error) {
+        console.error("Failed to load categories from Firestore", error);
+        return [];
+    }
 }
 
 export async function addParticipant(participant: ParticipantInput & { categoryId?: string, chipNumber: string }): Promise<Participant> {
     const { id, ...dataToSave } = participant as any; // Firestore fails if id is present
-    const docRef = await addDoc(collection(db, "participants"), dataToSave);
-    return { ...dataToSave, id: docRef.id } as Participant;
+    const sanitizedData = removeUndefinedFields(dataToSave);
+    const docRef = await addDoc(collection(db, "participants"), sanitizedData);
+    return { ...sanitizedData, id: docRef.id } as Participant;
 }
 
 export async function updateParticipant(updatedParticipant: Participant): Promise<Participant | null> {
     const participantRef = doc(db, "participants", updatedParticipant.id);
     const { id, ...dataToUpdate } = updatedParticipant;
-    await updateDoc(participantRef, dataToUpdate);
+    const sanitizedData = removeUndefinedFields(dataToUpdate);
+    await updateDoc(participantRef, sanitizedData);
     const updatedDoc = await getDoc(participantRef);
     if(updatedDoc.exists()) {
         return { id: updatedDoc.id, ...updatedDoc.data() } as Participant;
@@ -104,7 +120,8 @@ export async function importParticipants(participants: ParticipantToCreate[]): P
         chunk.forEach(participant => {
             const docRef = doc(participantsCol);
             const { id, ...dataToSave } = participant as any;
-            batch.set(docRef, dataToSave);
+            const sanitizedData = removeUndefinedFields(dataToSave);
+            batch.set(docRef, sanitizedData);
         });
 
         await batch.commit();

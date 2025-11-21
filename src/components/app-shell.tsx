@@ -29,7 +29,6 @@ import Link from "next/link";
 import { RaceTimerProLogo } from "./icons";
 import { Button } from "./ui/button";
 import { Label } from "./ui/label";
-import { Switch } from "./ui/switch";
 import { Separator } from "./ui/separator";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import { AppContext } from "@/context/app-context";
@@ -55,8 +54,9 @@ import {
 } from "./ui/select";
 
 const navItems = [
-  { href: "/", icon: Timer, label: "Cronómetro" },
-  { href: "/categories", icon: LayoutGrid, label: "Categorías" },
+  { href: "/", icon: Timer, label: "Cronómetro", roles: ["owner", "admin", "loader"] },
+  { href: "/categories", icon: LayoutGrid, label: "Categorías", roles: ["owner", "admin"] },
+  { href: "/live", icon: Eye, label: "Clasificación", roles: ["owner", "admin", "loader", "user"] },
 ];
 
 function AppHeader() {
@@ -66,6 +66,8 @@ function AppHeader() {
   const pageTitles: { [key: string]: string } = {
     "/": "Cronómetro de Participantes",
     "/categories": "Administrar Categorías",
+    "/live": "Clasificación en Tiempo Real",
+    "/auth": "Acceso",
   };
   const pathname = usePathname();
   const title = pageTitles[pathname] ?? "Panel";
@@ -125,15 +127,20 @@ function AppHeader() {
         </DropdownMenu>
 
         <div className="flex items-center gap-2">
-          <Label htmlFor="role-switch" className="text-sm font-medium">
-            {role === "admin" ? "Administrador" : "Espectador"}
+          <Label htmlFor="role-select" className="text-sm font-medium">
+            Rol
           </Label>
-          <Switch
-            id="role-switch"
-            checked={role === "admin"}
-            onCheckedChange={(checked) => setRole(checked ? "admin" : "viewer")}
-            aria-label="Toggle admin mode"
-          />
+          <Select value={role} onValueChange={(value) => setRole(value as typeof role)}>
+            <SelectTrigger id="role-select" className="w-[140px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="owner">Owner</SelectItem>
+              <SelectItem value="admin">Administrador</SelectItem>
+              <SelectItem value="loader">Cargador</SelectItem>
+              <SelectItem value="user">Usuario</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         <Separator orientation="vertical" className="h-8" />
         <DropdownMenu>
@@ -181,13 +188,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <div className="flex items-center gap-2">
               <RaceTimerProLogo className="size-8" />
               <span className="text-lg font-semibold text-sidebar-foreground">
-                RaceTimer Pro
+                LapTimer
               </span>
             </div>
           </SidebarHeader>
           <SidebarContent>
             <SidebarMenu>
-              {navItems.map((item) => (
+              {navItems.filter(item => item.roles.includes(role)).map((item) => (
                 <SidebarMenuItem key={item.href}>
                   <Link href={item.href}>
                     <SidebarMenuButton
