@@ -56,7 +56,7 @@ import {
 const navItems = [
   { href: "/", icon: Timer, label: "Cronómetro", roles: ["owner", "admin", "loader"] },
   { href: "/categories", icon: LayoutGrid, label: "Categorías", roles: ["owner", "admin"] },
-  { href: "/live", icon: Eye, label: "Clasificación", roles: ["owner", "admin", "loader", "user"] },
+  { href: "/live", icon: Eye, label: "Clasificación", roles: ["owner", "admin", "user"] },
 ];
 
 function AppHeader() {
@@ -178,7 +178,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const allowedPaths: Record<string, string[]> = {
       owner: ["/", "/categories", "/live"],
       admin: ["/", "/categories", "/live"],
-      loader: ["/", "/live"],
+      loader: ["/"],
       user: ["/live"],
     };
 
