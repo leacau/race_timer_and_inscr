@@ -121,7 +121,7 @@ export function TimingDashboard({
     });
 
     return Array.from(map.entries())
-      .sort((a, b) => a[1].label.localeCompare(b[1].label))
+      .sort((a, b) => (a[1].label ?? "").localeCompare(b[1].label ?? ""))
       .map(([key, value]) => ({
         key: `category:${key}`,
         label: value.label,
@@ -207,7 +207,7 @@ export function TimingDashboard({
 
   const sortedParticipants = useMemo(() => {
     return [...participants].sort((a, b) =>
-      a.bibNumber.localeCompare(b.bibNumber, undefined, { numeric: true, sensitivity: "base" })
+      (a.bibNumber ?? "").localeCompare(b.bibNumber ?? "", undefined, { numeric: true, sensitivity: "base" })
     );
   }, [participants]);
 
