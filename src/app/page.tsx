@@ -2,6 +2,7 @@ import { LiveResultsPanel } from '@/components/live-results-panel'
 import { AdminCards } from '@/components/admin-cards'
 import { PublicRegistration } from '@/components/public-registration'
 import { Shell } from '@/components/shell'
+import { HomeActions } from '@/components/home-actions'
 
 export default function Home() {
   return (
@@ -27,6 +28,7 @@ export default function Home() {
         </div>
         <LiveResultsPanel />
       </section>
+      <HomeActions />
       <AdminCards />
       <PublicRegistration />
     </Shell>

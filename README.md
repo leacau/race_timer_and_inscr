@@ -47,7 +47,11 @@ Starter multi-tenant para gestionar eventos deportivos cronometrados (running, t
    npm run dev
    ```
 
-5. **Pruebas**
+5. **Probar sin salir del home**
+
+   La portada incluye un checklist interactivo para copiar los comandos anteriores y lanzar ejemplos de API seed (inscripción, lectura de tiempo y ranking) contra `http://localhost:3000`. Úsalo para validar que el stack quedó listo.
+
+6. **Pruebas**
 
    ```bash
    npm test
