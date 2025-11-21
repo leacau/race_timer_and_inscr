@@ -31,6 +31,8 @@ Starter multi-tenant para gestionar eventos deportivos cronometrados (running, t
    npm install
    ```
 
+   La instalación ejecuta `prisma generate` (postinstall). Si usas un entorno sin scripts automáticos, corre `npm run db:generate` antes de `npm run build` para evitar errores de `@prisma/client`.
+
 3. **Migraciones y seed**
 
    ```bash
