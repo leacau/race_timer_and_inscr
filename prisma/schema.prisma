@@ -1,0 +1,277 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ORGANIZER
+  TIMER
+  STAFF
+  PARTICIPANT
+}
+
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum RegistrationStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  WAITLIST
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  NON_BINARY
+  OPEN
+}
+
+enum RaceDiscipline {
+  RUNNING
+  TRAIL
+  CYCLING
+  TRIATHLON
+  MOTORBIKE
+  CAR
+  RALLY
+}
+
+enum TimingPointType {
+  START
+  SPLIT
+  FINISH
+  STAGE_START
+  STAGE_FINISH
+}
+
+enum ResultStatus {
+  OK
+  DNS
+  DNF
+  DSQ
+}
+
+enum TeamType {
+  SOLO
+  TEAM
+}
+
+model Organization {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  contactEmail String
+  timezone    String   @default("UTC")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  users       User[]
+  events      Event[]
+}
+
+model User {
+  id             String   @id @default(cuid())
+  email          String   @unique
+  passwordHash   String
+  role           UserRole
+  displayName    String?
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Event {
+  id             String   @id @default(cuid())
+  name           String
+  slug           String   @unique
+  description    String?
+  location       String?
+  status         EventStatus @default(DRAFT)
+  startDate      DateTime
+  endDate        DateTime?
+  timezone       String   @default("UTC")
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+  races          Race[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Race {
+  id             String   @id @default(cuid())
+  name           String
+  distanceKm     Float
+  discipline     RaceDiscipline
+  startTime      DateTime
+  capacity       Int?
+  isRelay        Boolean   @default(false)
+  event          Event     @relation(fields: [eventId], references: [id])
+  eventId        String
+  categories     Category[]
+  timingPoints   TimingPoint[]
+  registrations  Registration[]
+  stages         Stage[]
+  teams          Team[]
+  results        Result[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Stage {
+  id        String @id @default(cuid())
+  name      String
+  order     Int
+  distanceKm Float
+  race      Race   @relation(fields: [raceId], references: [id])
+  raceId    String
+  timingPoints TimingPoint[]
+  results   Result[]
+
+  @@index([raceId, order])
+}
+
+model Category {
+  id        String @id @default(cuid())
+  name      String
+  minAge    Int?
+  maxAge    Int?
+  gender    Gender
+  teamType  TeamType @default(SOLO)
+  capacity  Int?
+  race      Race   @relation(fields: [raceId], references: [id])
+  raceId    String
+  registrations Registration[]
+
+  @@index([raceId, gender])
+}
+
+model Participant {
+  id          String @id @default(cuid())
+  firstName   String
+  lastName    String
+  gender      Gender
+  birthDate   DateTime
+  email       String
+  phone       String?
+  nationalId  String?
+  team        Team?    @relation(fields: [teamId], references: [id])
+  teamId      String?
+  registrations Registration[]
+
+  @@index([email])
+}
+
+model Team {
+  id        String @id @default(cuid())
+  name      String
+  race      Race   @relation(fields: [raceId], references: [id])
+  raceId    String
+  category  Category? @relation(fields: [categoryId], references: [id])
+  categoryId String?
+  participants Participant[]
+
+  @@index([raceId])
+}
+
+model Registration {
+  id           String @id @default(cuid())
+  bibNumber    Int?
+  chipCode     String?
+  status       RegistrationStatus @default(PENDING)
+  registeredAt DateTime @default(now())
+  participant  Participant @relation(fields: [participantId], references: [id])
+  participantId String
+  race         Race @relation(fields: [raceId], references: [id])
+  raceId       String
+  category     Category? @relation(fields: [categoryId], references: [id])
+  categoryId   String?
+  team         Team? @relation(fields: [teamId], references: [id])
+  teamId       String?
+  payments     Payment[]
+  timeReads    TimeRead[]
+  result       Result?
+
+  @@unique([participantId, raceId])
+  @@index([raceId, status])
+}
+
+model Payment {
+  id              String @id @default(cuid())
+  provider        String
+  amount          Int
+  currency        String @default("USD")
+  status          PaymentStatus @default(PENDING)
+  providerRef     String?
+  paidAt          DateTime?
+  registration    Registration @relation(fields: [registrationId], references: [id])
+  registrationId  String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([status])
+}
+
+model TimingPoint {
+  id          String @id @default(cuid())
+  name        String
+  order       Int
+  type        TimingPointType
+  code        String   @unique
+  race        Race   @relation(fields: [raceId], references: [id])
+  raceId      String
+  stage       Stage? @relation(fields: [stageId], references: [id])
+  stageId     String?
+  timeReads   TimeRead[]
+
+  @@index([raceId, order])
+}
+
+model TimeRead {
+  id              String @id @default(cuid())
+  recordedAt      DateTime
+  offsetMs        Int      @default(0)
+  source          String   @default("manual")
+  registration    Registration @relation(fields: [registrationId], references: [id])
+  registrationId  String
+  timingPoint     TimingPoint @relation(fields: [timingPointId], references: [id])
+  timingPointId   String
+
+  @@unique([registrationId, timingPointId])
+  @@index([timingPointId])
+}
+
+model Result {
+  id              String @id @default(cuid())
+  race            Race   @relation(fields: [raceId], references: [id])
+  raceId          String
+  registration    Registration @relation(fields: [registrationId], references: [id])
+  registrationId  String @unique
+  stage           Stage? @relation(fields: [stageId], references: [id])
+  stageId         String?
+  grossTimeMs     Int?
+  netTimeMs       Int?
+  penaltiesMs     Int @default(0)
+  status          ResultStatus @default(OK)
+  overallRank     Int?
+  genderRank      Int?
+  categoryRank    Int?
+
+  @@index([raceId, status])
+  @@index([raceId, categoryRank])
+}
