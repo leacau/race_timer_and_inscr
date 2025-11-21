@@ -171,6 +171,7 @@ function AppHeader() {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { role } = React.useContext(AppContext);
   const [isClient, setIsClient] = React.useState(false);
 
   React.useEffect(() => {
