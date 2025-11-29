@@ -57,6 +57,8 @@ const genderLabels: Record<Participant["gender"], string> = {
   Other: "Otro",
 };
 
+const utf8Encoder = new TextEncoder();
+
 const downloadBlob = (blob: Blob, filename: string) => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -100,24 +102,9 @@ const wrapText = (line: string, maxChars = 100) => {
 };
 
 const encodePdfText = (text: string) => {
-  const needsUnicode = /[^\x20-\x7E]/.test(text);
-  if (!needsUnicode) {
-    const safeText = text
-      .split("")
-      .map((char) => {
-        if (char === "\\" || char === "(" || char === ")") {
-          return `\\${char}`;
-        }
-        return char;
-      })
-      .join("");
-    return `(${safeText})`;
-  }
-
-  const hex = [
-    "FEFF",
-    ...Array.from(text).map((char) => char.charCodeAt(0).toString(16).padStart(4, "0")),
-  ].join("");
+  const hex = Array.from(utf8Encoder.encode(text))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
   return `<${hex}>`;
 };
 
@@ -136,7 +123,7 @@ const buildTablesPdf = (title: string, sections: PdfSection[]) => {
   const rowPadding = 6;
   const textLineHeight = 12;
   const tableWidth = pageWidth - margin * 2;
-  const encoder = new TextEncoder();
+  const encoder = utf8Encoder;
   const safeSections =
     sections.length > 0
       ? sections
@@ -275,8 +262,8 @@ const buildTablesPdf = (title: string, sections: PdfSection[]) => {
   });
 
   objects[2] = `2 0 obj\n<< /Type /Pages /Kids [${kids.join(" ")}] /Count ${totalPages} >>\nendobj`;
-  objects[fontStartIndex] = `${fontStartIndex} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj`;
-  objects[fontStartIndex + 1] = `${fontStartIndex + 1} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj`;
+  objects[fontStartIndex] = `${fontStartIndex} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Arial /Encoding /WinAnsiEncoding >>\nendobj`;
+  objects[fontStartIndex + 1] = `${fontStartIndex + 1} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Arial-Bold /Encoding /WinAnsiEncoding >>\nendobj`;
 
   let pdf = "%PDF-1.4\n";
   const offsets: number[] = new Array(objects.length).fill(0);
