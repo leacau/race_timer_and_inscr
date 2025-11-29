@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import * as db from "./data";
 import { assignCategory } from "./logic";
-import { generateChipNumber } from "./utils";
+import { calculateAge, generateChipNumber } from "./utils";
 import type {
   AgeCalculationMethod,
   Category,
@@ -27,6 +27,17 @@ export type CategoryAssignmentOptions =
   | { strategy: "manual"; target: SelectionTarget; categoryId: string | null };
 
 export type TimingMode = 'general' | 'distance' | 'category';
+
+type BibAssignmentFilters = {
+  distance?: Participant["distance"];
+  gender?: Participant["gender"];
+  minAge?: number;
+  maxAge?: number;
+};
+
+export type BibAssignmentOptions =
+  | { mode: "single"; participantId: string; bibNumber: string }
+  | { mode: "bulk"; fromBib: string; toBib: string; filters?: BibAssignmentFilters; includeAssigned?: boolean };
 
 // Participant Actions
 export async function addParticipant(
@@ -291,6 +302,120 @@ export async function assignCategoriesToParticipants(
       updates.push({ id: participant.id, data });
     });
   }
+
+  await db.bulkUpdateParticipants(updates);
+  revalidatePath("/");
+  revalidatePath("/competitors");
+  return { updated: updates.length };
+}
+
+export async function assignBibNumbers(
+  options: BibAssignmentOptions,
+  raceDate: Date,
+  ageCalculationMethod: AgeCalculationMethod,
+  raceId: string
+) {
+  const participants = await db.getParticipants(raceId);
+
+  const hasConflict = (bib: string, ignoreIds: Set<string>) => {
+    const normalized = bib.trim();
+    return participants.some((p) => !ignoreIds.has(p.id) && p.bibNumber.trim() === normalized);
+  };
+
+  if (options.mode === "single") {
+    const target = participants.find((p) => p.id === options.participantId);
+    if (!target) {
+      throw new Error("Participante no encontrado para asignar dorsal.");
+    }
+
+    const bib = options.bibNumber.trim();
+    if (!bib) {
+      throw new Error("Debes indicar un dorsal válido.");
+    }
+
+    const ignoreIds = new Set<string>([target.id]);
+    if (hasConflict(bib, ignoreIds)) {
+      throw new Error(`El dorsal ${bib} ya está asignado a otro participante.`);
+    }
+
+    await db.updateParticipant(target.id, {
+      bibNumber: bib,
+      chipNumber: generateChipNumber(bib),
+    });
+
+    revalidatePath("/");
+    revalidatePath("/competitors");
+    return { updated: 1 };
+  }
+
+  const from = parseInt(options.fromBib, 10);
+  const to = parseInt(options.toBib, 10);
+
+  if (Number.isNaN(from) || Number.isNaN(to)) {
+    throw new Error("Los dorsales de inicio y fin deben ser numéricos.");
+  }
+
+  const filters = options.filters ?? {};
+  const includeAssigned = Boolean(options.includeAssigned);
+
+  const targets = participants
+    .filter((p) => {
+      if (!includeAssigned && p.bibNumber) return false;
+      if (filters.distance && p.distance !== filters.distance) return false;
+      if (filters.gender && p.gender !== filters.gender) return false;
+      const age = calculateAge(p.birthDate, raceDate, ageCalculationMethod);
+      if (typeof filters.minAge === "number" && (age === null || age < filters.minAge)) return false;
+      if (typeof filters.maxAge === "number" && (age === null || age > filters.maxAge)) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      const surnameCompare = a.surname.localeCompare(b.surname, "es", { sensitivity: "base" });
+      if (surnameCompare !== 0) return surnameCompare;
+      return a.name.localeCompare(b.name, "es", { sensitivity: "base" });
+    });
+
+  if (targets.length === 0) {
+    return { updated: 0 };
+  }
+
+  const start = from;
+  const end = to;
+  const step = start <= end ? 1 : -1;
+
+  const reservedBibs = new Set<string>();
+  const targetIds = new Set(targets.map((t) => t.id));
+  participants.forEach((p) => {
+    if (targetIds.has(p.id)) return;
+    if (p.bibNumber) {
+      reservedBibs.add(p.bibNumber.trim());
+    }
+  });
+
+  const availableBibs: string[] = [];
+  for (let current = start; step === 1 ? current <= end : current >= end; current += step) {
+    const candidate = String(current);
+    if (!reservedBibs.has(candidate)) {
+      availableBibs.push(candidate);
+    }
+    if (availableBibs.length >= targets.length) {
+      break;
+    }
+  }
+
+  if (availableBibs.length < targets.length) {
+    throw new Error("El rango no tiene suficientes dorsales libres para los participantes seleccionados.");
+  }
+
+  const updates = targets.map((participant, index) => {
+    const bibNumber = availableBibs[index];
+    return {
+      id: participant.id,
+      data: {
+        bibNumber,
+        chipNumber: generateChipNumber(bibNumber),
+      },
+    };
+  });
 
   await db.bulkUpdateParticipants(updates);
   revalidatePath("/");

@@ -46,7 +46,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { MoreVertical, Edit, Trash2, Plus, Upload, Sparkles } from "lucide-react";
+import { Hash, MoreVertical, Edit, Trash2, Plus, Upload, Sparkles } from "lucide-react";
 import type { Participant, Category, ParticipantInput, Race } from "@/lib/types";
 import { calculateAge, deriveBirthDateFromAge } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -61,6 +61,7 @@ import {
   importParticipants,
   bulkDeleteParticipants,
   assignCategoriesToParticipants,
+  assignBibNumbers,
 } from "@/lib/actions";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -196,6 +197,17 @@ export function CompetitorsManager({
     distance: "5k",
   });
   const [isAssigning, setIsAssigning] = useState(false);
+  const [isBibDialogOpen, setIsBibDialogOpen] = useState(false);
+  const [bibTab, setBibTab] = useState<"single" | "bulk">("single");
+  const [singleBibParticipantId, setSingleBibParticipantId] = useState<string>("");
+  const [singleBibNumber, setSingleBibNumber] = useState<string>("");
+  const [bulkBibRange, setBulkBibRange] = useState<{ from: string; to: string }>({ from: "", to: "" });
+  const [bulkBibDistance, setBulkBibDistance] = useState<Participant["distance"] | "all">("all");
+  const [bulkBibGender, setBulkBibGender] = useState<Participant["gender"] | "any">("any");
+  const [bulkBibMinAge, setBulkBibMinAge] = useState<string>("");
+  const [bulkBibMaxAge, setBulkBibMaxAge] = useState<string>("");
+  const [includeAssignedBibs, setIncludeAssignedBibs] = useState(false);
+  const [isAssigningBibs, setIsAssigningBibs] = useState(false);
   const [dniQuery, setDniQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Participant[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
@@ -460,6 +472,94 @@ export function CompetitorsManager({
       toast({ variant: "destructive", title: "Error", description: "No se pudieron actualizar las categorías." });
     } finally {
       setIsAssigning(false);
+    }
+  };
+
+  const handleOpenBibDialog = () => {
+    const firstSelected = Array.from(selectedParticipants)[0];
+    setSingleBibParticipantId(firstSelected || "");
+    const candidate = participants.find((p) => p.id === firstSelected);
+    setSingleBibNumber(candidate?.bibNumber ?? "");
+    setIsBibDialogOpen(true);
+  };
+
+  const handleBibAssignmentSubmit = async () => {
+    try {
+      if (!raceId) {
+        toast({ variant: "destructive", title: "Selecciona una carrera", description: "Necesitas una carrera activa para asignar dorsales." });
+        return;
+      }
+      setIsAssigningBibs(true);
+
+      if (bibTab === "single") {
+        if (!singleBibParticipantId) {
+          toast({ variant: "destructive", title: "Selecciona un participante", description: "Elige a quién asignar el dorsal." });
+          return;
+        }
+        if (!singleBibNumber.trim()) {
+          toast({ variant: "destructive", title: "Dorsal requerido", description: "Indica el número de dorsal." });
+          return;
+        }
+
+        await assignBibNumbers(
+          { mode: "single", participantId: singleBibParticipantId, bibNumber: singleBibNumber.trim() },
+          raceDate,
+          ageCalculationMethod,
+          raceId
+        );
+        toast({ title: "Dorsal actualizado", description: "Se guardó el dorsal y el chip del participante." });
+      } else {
+        if (!bulkBibRange.from.trim() || !bulkBibRange.to.trim()) {
+          toast({ variant: "destructive", title: "Rango requerido", description: "Completa el dorsal inicial y final." });
+          return;
+        }
+
+        const minAge = bulkBibMinAge ? Number(bulkBibMinAge) : undefined;
+        const maxAge = bulkBibMaxAge ? Number(bulkBibMaxAge) : undefined;
+
+        if ((bulkBibMinAge && Number.isNaN(minAge)) || (bulkBibMaxAge && Number.isNaN(maxAge))) {
+          toast({ variant: "destructive", title: "Edad inválida", description: "Las edades mínima y máxima deben ser numéricas." });
+          return;
+        }
+
+        if (typeof minAge === "number" && typeof maxAge === "number" && minAge > maxAge) {
+          toast({ variant: "destructive", title: "Rango de edad inválido", description: "La edad mínima no puede superar a la máxima." });
+          return;
+        }
+
+        const result = await assignBibNumbers(
+          {
+            mode: "bulk",
+            fromBib: bulkBibRange.from.trim(),
+            toBib: bulkBibRange.to.trim(),
+            includeAssigned: includeAssignedBibs,
+            filters: {
+              distance: bulkBibDistance === "all" ? undefined : bulkBibDistance,
+              gender: bulkBibGender === "any" ? undefined : bulkBibGender,
+              minAge,
+              maxAge,
+            },
+          },
+          raceDate,
+          ageCalculationMethod,
+          raceId
+        );
+
+        toast({
+          title: "Dorsales asignados",
+          description:
+            result.updated === 0
+              ? "No se encontraron participantes que cumplan los filtros."
+              : `Se actualizaron ${result.updated} participante(s).`,
+        });
+      }
+
+      setIsBibDialogOpen(false);
+    } catch (error) {
+      console.error(error);
+      toast({ variant: "destructive", title: "Error", description: error instanceof Error ? error.message : "No se pudieron asignar los dorsales." });
+    } finally {
+      setIsAssigningBibs(false);
     }
   };
 
@@ -897,6 +997,13 @@ export function CompetitorsManager({
               accept=".xlsx, .xls, .csv"
             />
             <Button
+              variant="outline"
+              onClick={handleOpenBibDialog}
+              disabled={participants.length === 0}
+            >
+              <Hash className="mr-2 h-4 w-4" /> Asignar dorsales
+            </Button>
+            <Button
               variant="secondary"
               onClick={() => setIsAssignmentDialogOpen(true)}
               disabled={participants.length === 0}
@@ -1143,6 +1250,143 @@ export function CompetitorsManager({
               </DialogFooter>
             </form>
           </Form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isBibDialogOpen} onOpenChange={setIsBibDialogOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Asignar dorsales</DialogTitle>
+            <DialogDescription>
+              Asigna o reasigna dorsales manualmente. Los chips se recalculan automáticamente según el dorsal.
+            </DialogDescription>
+          </DialogHeader>
+          <Tabs value={bibTab} onValueChange={(value) => setBibTab(value as "single" | "bulk")} className="mt-2">
+            <TabsList className="grid grid-cols-2">
+              <TabsTrigger value="single">Individual</TabsTrigger>
+              <TabsTrigger value="bulk">Masivo</TabsTrigger>
+            </TabsList>
+            <TabsContent value="single" className="space-y-4 pt-4">
+              <div className="space-y-2">
+                <Label>Participante</Label>
+                <Select
+                  value={singleBibParticipantId}
+                  onValueChange={(value) => setSingleBibParticipantId(value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Elige un participante" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {participants.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {`${p.bibNumber ? `${p.bibNumber} - ` : ""}${p.name} ${p.surname} (${p.distance})`}`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Dorsal</Label>
+                <Input value={singleBibNumber} onChange={(e) => setSingleBibNumber(e.target.value)} />
+                <p className="text-xs text-muted-foreground">El chip se regenerará en base al dorsal indicado.</p>
+              </div>
+            </TabsContent>
+            <TabsContent value="bulk" className="space-y-4 pt-4">
+              <p className="text-sm text-muted-foreground">
+                Define un rango y filtra por distancia, género o edad para asignar dorsales consecutivos automáticamente.
+              </p>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Dorsal desde</Label>
+                  <Input
+                    type="number"
+                    value={bulkBibRange.from}
+                    onChange={(e) => setBulkBibRange((prev) => ({ ...prev, from: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Dorsal hasta</Label>
+                  <Input
+                    type="number"
+                    value={bulkBibRange.to}
+                    onChange={(e) => setBulkBibRange((prev) => ({ ...prev, to: e.target.value }))}
+                  />
+                </div>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Distancia</Label>
+                  <Select
+                    value={bulkBibDistance}
+                    onValueChange={(value) => setBulkBibDistance(value as Participant["distance"] | "all")}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Todas" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todas</SelectItem>
+                      <SelectItem value="5k">5k</SelectItem>
+                      <SelectItem value="10k">10k</SelectItem>
+                      <SelectItem value="21k">21k</SelectItem>
+                      <SelectItem value="42k">42k</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Género</Label>
+                  <Select
+                    value={bulkBibGender}
+                    onValueChange={(value) => setBulkBibGender(value as Participant["gender"] | "any")}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Todos" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="any">Todos</SelectItem>
+                      <SelectItem value="Male">Masculino</SelectItem>
+                      <SelectItem value="Female">Femenino</SelectItem>
+                      <SelectItem value="Other">Otro</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Edad mínima</Label>
+                  <Input value={bulkBibMinAge} onChange={(e) => setBulkBibMinAge(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Edad máxima</Label>
+                  <Input value={bulkBibMaxAge} onChange={(e) => setBulkBibMaxAge(e.target.value)} />
+                </div>
+              </div>
+              <div className="flex items-center space-x-2 rounded-md border p-3">
+                <Checkbox
+                  id="include-assigned-bibs"
+                  checked={includeAssignedBibs}
+                  onCheckedChange={(checked) => setIncludeAssignedBibs(Boolean(checked))}
+                />
+                <div className="space-y-1 leading-none">
+                  <Label htmlFor="include-assigned-bibs" className="font-normal">
+                    Reasignar aunque ya tengan dorsal
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Si está desactivado, solo se asignarán dorsales a quienes no tengan uno cargado.
+                  </p>
+                </div>
+              </div>
+            </TabsContent>
+          </Tabs>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="secondary">
+                Cancelar
+              </Button>
+            </DialogClose>
+            <Button onClick={handleBibAssignmentSubmit} disabled={isAssigningBibs}>
+              {isAssigningBibs ? "Asignando..." : "Guardar"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
