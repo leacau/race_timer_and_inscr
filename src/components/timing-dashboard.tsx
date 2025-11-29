@@ -40,6 +40,7 @@ type ArrivalEntry = {
   gender: Participant["gender"];
   startTime: number;
   finishTime: number;
+  isSpecial: boolean;
   isDuplicate?: boolean;
 };
 
@@ -102,9 +103,21 @@ const wrapText = (line: string, maxChars = 100) => {
 };
 
 const encodePdfText = (text: string) => {
-  const hex = Array.from(utf8Encoder.encode(text))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  const codePoints = Array.from(text);
+  const bytes: number[] = [0xfe, 0xff];
+
+  for (const char of codePoints) {
+    const code = char.codePointAt(0)!;
+    if (code > 0xffff) {
+      const high = Math.floor((code - 0x10000) / 0x400) + 0xd800;
+      const low = ((code - 0x10000) % 0x400) + 0xdc00;
+      bytes.push((high >> 8) & 0xff, high & 0xff, (low >> 8) & 0xff, low & 0xff);
+    } else {
+      bytes.push((code >> 8) & 0xff, code & 0xff);
+    }
+  }
+
+  const hex = bytes.map((byte) => byte.toString(16).padStart(2, "0")).join("");
   return `<${hex}>`;
 };
 
@@ -443,6 +456,7 @@ export function TimingDashboard({
         gender: participant.gender,
         startTime: participant.startTime!,
         finishTime: participant.finishTime!,
+        isSpecial: participant.isSpecial ?? false,
       }));
   }, [participants]);
 
@@ -456,6 +470,10 @@ export function TimingDashboard({
   const finishers = useMemo(() => {
     return [...finisherEntries, ...duplicateArrivals].sort((a, b) => a.finishTime - b.finishTime);
   }, [finisherEntries, duplicateArrivals]);
+
+  const specialFinishers = useMemo(() => {
+    return finishers.filter((arrival) => participantMapById[arrival.participantId]?.isSpecial);
+  }, [finishers, participantMapById]);
 
   const categoryArrivals = useMemo(() => {
     const map = new Map<string, { label: string; members: ArrivalEntry[] }>();
@@ -471,6 +489,15 @@ export function TimingDashboard({
       .sort((a, b) => a[1].label.localeCompare(b[1].label))
       .map(([key, value]) => ({ key, ...value }));
   }, [finishers, categoriesMap]);
+
+  const categorySpecialArrivals = useMemo(() => {
+    return categoryArrivals
+      .map((category) => ({
+        ...category,
+        members: category.members.filter((arrival) => participantMapById[arrival.participantId]?.isSpecial),
+      }))
+      .filter((category) => category.members.length > 0);
+  }, [categoryArrivals, participantMapById]);
 
   const genderArrivals = useMemo(() => {
     const map = new Map<Participant["gender"], ArrivalEntry[]>();
@@ -490,6 +517,15 @@ export function TimingDashboard({
       .filter((entry) => entry.members.length > 0)
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [finishers]);
+
+  const genderSpecialArrivals = useMemo(() => {
+    return genderArrivals
+      .map((entry) => ({
+        ...entry,
+        members: entry.members.filter((arrival) => participantMapById[arrival.participantId]?.isSpecial),
+      }))
+      .filter((entry) => entry.members.length > 0);
+  }, [genderArrivals, participantMapById]);
 
   const getGroupKeyForParticipant = (participant: Participant, currentMode: TimingMode) => {
     if (currentMode === "general") return "general";
@@ -621,6 +657,7 @@ export function TimingDashboard({
           gender: participant.gender,
           startTime: effectiveStartTime,
           finishTime,
+          isSpecial: participant.isSpecial ?? false,
           isDuplicate: true,
         };
         setDuplicateArrivals((prev) => [...prev, duplicateEntry]);
@@ -669,6 +706,7 @@ export function TimingDashboard({
         Ciudad: participant?.city ?? "",
         Provincia: participant?.province ?? "",
         País: participant?.country ?? "",
+        Especial: participant?.isSpecial ? "Sí" : "No",
         "Categoría especial": participant?.isSpecial ? "Sí" : "No",
         "Hora de inicio": participant?.startTime ? new Date(participant.startTime).toLocaleString() : "",
         "Hora de llegada": new Date(arrival.finishTime).toLocaleString(),
@@ -680,25 +718,62 @@ export function TimingDashboard({
       const workbook = XLSX.utils.book_new();
       const worksheet = XLSX.utils.json_to_sheet(rows);
       XLSX.utils.book_append_sheet(workbook, worksheet, "General");
+      if (specialFinishers.length > 0) {
+        const specialRows = specialFinishers.map((arrival, index) => {
+          const participant = participantMapById[arrival.participantId];
+          const categoryLabel = arrival.categoryId ? categoriesMap[arrival.categoryId] || "Sin categoría" : "Sin categoría";
+          return {
+            "Posición": index + 1,
+            Dorsal: arrival.displayBib,
+            Nombre: participant?.name ?? arrival.name,
+            Apellido: participant?.surname ?? arrival.surname,
+            Género: participant ? genderLabels[participant.gender] : "",
+            Categoría: categoryLabel,
+            Distancia: arrival.distance,
+            Tiempo: formatElapsedTime(arrival.finishTime - arrival.startTime),
+          };
+        });
+        const specialSheet = XLSX.utils.json_to_sheet(specialRows);
+        XLSX.utils.book_append_sheet(workbook, specialSheet, "Especiales");
+      }
       XLSX.writeFile(workbook, `llegadas_general_${timestamp}.xlsx`);
       return;
     }
 
-    const pdf = buildTablesPdf("Llegadas generales", [
+    const pdfSections: PdfSection[] = [
       {
         title: "Clasificación general",
-        headers: ["#", "Dorsal", "Nombre completo", "Categoría", "Distancia", "Tiempo"],
-        columnWeights: [0.5, 0.8, 1.4, 1.1, 0.8, 0.7],
+        headers: ["#", "Dorsal", "Nombre completo", "Especial", "Categoría", "Distancia", "Tiempo"],
+        columnWeights: [0.5, 0.8, 1.3, 0.8, 1, 0.8, 0.7],
         rows: rows.map((row) => [
           row["Posición"],
           row.Dorsal,
           `${row.Nombre} ${row.Apellido}`.trim(),
+          row.Especial,
           row["Categoría"],
           String(row.Distancia).toUpperCase(),
           row.Tiempo,
         ]),
       },
-    ]);
+    ];
+
+    if (specialFinishers.length > 0) {
+      pdfSections.push({
+        title: "Clasificación especial",
+        headers: ["#", "Dorsal", "Nombre", "Categoría", "Distancia", "Tiempo"],
+        columnWeights: [0.5, 0.8, 1.6, 1.1, 0.8, 0.7],
+        rows: specialFinishers.map((arrival, index) => [
+          index + 1,
+          arrival.displayBib,
+          `${arrival.name} ${arrival.surname}`,
+          arrival.categoryId ? categoriesMap[arrival.categoryId] || "Sin categoría" : "Sin categoría",
+          arrival.distance.toUpperCase(),
+          formatElapsedTime(arrival.finishTime - arrival.startTime),
+        ]),
+      });
+    }
+
+    const pdf = buildTablesPdf("Llegadas generales", pdfSections);
     downloadBlob(pdf, `llegadas_general_${timestamp}.pdf`);
   };
 
@@ -715,6 +790,7 @@ export function TimingDashboard({
           "Posición": index + 1,
           Dorsal: arrival.displayBib,
           Nombre: `${arrival.name} ${arrival.surname}`,
+          Especial: participantMapById[arrival.participantId]?.isSpecial ? "Sí" : "No",
           Distancia: arrival.distance,
           Tiempo: formatElapsedTime(arrival.finishTime - arrival.startTime),
         }));
@@ -723,23 +799,56 @@ export function TimingDashboard({
         );
         XLSX.utils.book_append_sheet(workbook, worksheet, sanitizeSheetName(category.label));
       });
+
+      if (categorySpecialArrivals.length > 0) {
+        categorySpecialArrivals.forEach((category) => {
+          const sheetRows = category.members.map((arrival, index) => ({
+            "Posición": index + 1,
+            Dorsal: arrival.displayBib,
+            Nombre: `${arrival.name} ${arrival.surname}`,
+            Tiempo: formatElapsedTime(arrival.finishTime - arrival.startTime),
+          }));
+          const worksheet = XLSX.utils.json_to_sheet(
+            sheetRows.length > 0 ? sheetRows : [{ Aviso: "Sin llegadas registradas" }]
+          );
+          XLSX.utils.book_append_sheet(
+            workbook,
+            worksheet,
+            sanitizeSheetName(`Especiales - ${category.label}`)
+          );
+        });
+      }
       XLSX.writeFile(workbook, `clasificacion_categorias_${timestamp}.xlsx`);
       return;
     }
 
     const pdf = buildTablesPdf(
       "Clasificación por categoría",
-      categoryArrivals.map((category) => ({
-        title: category.label,
-        headers: ["#", "Dorsal", "Nombre", "Tiempo"],
-        columnWeights: [0.5, 0.7, 1.8, 0.7],
-        rows: category.members.map((arrival, index) => [
-          index + 1,
-          arrival.displayBib,
-          `${arrival.name} ${arrival.surname}`,
-          formatElapsedTime(arrival.finishTime - arrival.startTime),
-        ]),
-      }))
+      [
+        ...categoryArrivals.map((category) => ({
+          title: category.label,
+          headers: ["#", "Dorsal", "Nombre", "Especial", "Tiempo"],
+          columnWeights: [0.5, 0.7, 1.6, 0.7, 0.7],
+          rows: category.members.map((arrival, index) => [
+            index + 1,
+            arrival.displayBib,
+            `${arrival.name} ${arrival.surname}`,
+            participantMapById[arrival.participantId]?.isSpecial ? "Sí" : "No",
+            formatElapsedTime(arrival.finishTime - arrival.startTime),
+          ]),
+        })),
+        ...categorySpecialArrivals.map((category) => ({
+          title: `Especiales · ${category.label}`,
+          headers: ["#", "Dorsal", "Nombre", "Tiempo"],
+          columnWeights: [0.5, 0.7, 1.8, 0.7],
+          rows: category.members.map((arrival, index) => [
+            index + 1,
+            arrival.displayBib,
+            `${arrival.name} ${arrival.surname}`,
+            formatElapsedTime(arrival.finishTime - arrival.startTime),
+          ]),
+        })),
+      ]
     );
     downloadBlob(pdf, `clasificacion_categorias_${timestamp}.pdf`);
   };
@@ -758,6 +867,7 @@ export function TimingDashboard({
           "Posición": index + 1,
           Dorsal: arrival.displayBib,
           Nombre: `${arrival.name} ${arrival.surname}`,
+          Especial: participantMapById[arrival.participantId]?.isSpecial ? "Sí" : "No",
           Categoría: arrival.categoryId ? categoriesMap[arrival.categoryId] ?? "Sin categoría" : "Sin categoría",
           Distancia: arrival.distance,
           Tiempo: formatElapsedTime(arrival.finishTime - arrival.startTime),
@@ -767,25 +877,58 @@ export function TimingDashboard({
         );
         XLSX.utils.book_append_sheet(workbook, worksheet, sanitizeSheetName(genderGroup.label));
       });
+
+      if (genderSpecialArrivals.length > 0) {
+        genderSpecialArrivals.forEach((genderGroup) => {
+          const sheetRows = genderGroup.members.map((arrival, index) => ({
+            "Posición": index + 1,
+            Dorsal: arrival.displayBib,
+            Nombre: `${arrival.name} ${arrival.surname}`,
+            Categoría: arrival.categoryId ? categoriesMap[arrival.categoryId] ?? "Sin categoría" : "Sin categoría",
+            Distancia: arrival.distance,
+            Tiempo: formatElapsedTime(arrival.finishTime - arrival.startTime),
+          }));
+          const worksheet = XLSX.utils.json_to_sheet(
+            sheetRows.length > 0 ? sheetRows : [{ Aviso: "Sin llegadas registradas" }]
+          );
+          XLSX.utils.book_append_sheet(workbook, worksheet, sanitizeSheetName(`Especiales - ${genderGroup.label}`));
+        });
+      }
       XLSX.writeFile(workbook, `clasificacion_genero_${timestamp}.xlsx`);
       return;
     }
 
     const pdf = buildTablesPdf(
       "Clasificación general por sexo",
-      genderArrivals.map((genderGroup) => ({
-        title: genderGroup.label,
-        headers: ["#", "Dorsal", "Nombre", "Categoría", "Distancia", "Tiempo"],
-        columnWeights: [0.5, 0.7, 1.6, 1.2, 0.8, 0.7],
-        rows: genderGroup.members.map((arrival, index) => [
-          index + 1,
-          arrival.displayBib,
-          `${arrival.name} ${arrival.surname}`,
-          arrival.categoryId ? categoriesMap[arrival.categoryId] ?? "Sin categoría" : "Sin categoría",
-          arrival.distance.toUpperCase(),
-          formatElapsedTime(arrival.finishTime - arrival.startTime),
-        ]),
-      }))
+      [
+        ...genderArrivals.map((genderGroup) => ({
+          title: genderGroup.label,
+          headers: ["#", "Dorsal", "Nombre", "Especial", "Categoría", "Distancia", "Tiempo"],
+          columnWeights: [0.5, 0.7, 1.4, 0.8, 1, 0.8, 0.7],
+          rows: genderGroup.members.map((arrival, index) => [
+            index + 1,
+            arrival.displayBib,
+            `${arrival.name} ${arrival.surname}`,
+            participantMapById[arrival.participantId]?.isSpecial ? "Sí" : "No",
+            arrival.categoryId ? categoriesMap[arrival.categoryId] ?? "Sin categoría" : "Sin categoría",
+            arrival.distance.toUpperCase(),
+            formatElapsedTime(arrival.finishTime - arrival.startTime),
+          ]),
+        })),
+        ...genderSpecialArrivals.map((genderGroup) => ({
+          title: `Especiales · ${genderGroup.label}`,
+          headers: ["#", "Dorsal", "Nombre", "Categoría", "Distancia", "Tiempo"],
+          columnWeights: [0.5, 0.7, 1.6, 1.1, 0.8, 0.7],
+          rows: genderGroup.members.map((arrival, index) => [
+            index + 1,
+            arrival.displayBib,
+            `${arrival.name} ${arrival.surname}`,
+            arrival.categoryId ? categoriesMap[arrival.categoryId] ?? "Sin categoría" : "Sin categoría",
+            arrival.distance.toUpperCase(),
+            formatElapsedTime(arrival.finishTime - arrival.startTime),
+          ]),
+        })),
+      ]
     );
     downloadBlob(pdf, `clasificacion_genero_${timestamp}.pdf`);
   };
@@ -952,6 +1095,7 @@ export function TimingDashboard({
                     <TableHead>#</TableHead>
                     <TableHead>Dorsal</TableHead>
                     <TableHead>Nombre</TableHead>
+                    <TableHead>Especial</TableHead>
                     <TableHead className="hidden md:table-cell">Categoría</TableHead>
                     <TableHead>Distancia</TableHead>
                     <TableHead>Tiempo</TableHead>
@@ -963,6 +1107,13 @@ export function TimingDashboard({
                       <TableCell className="font-semibold">{index + 1}</TableCell>
                       <TableCell className="font-semibold">{arrival.displayBib}</TableCell>
                       <TableCell>{`${arrival.name} ${arrival.surname}`}</TableCell>
+                      <TableCell>
+                        {participantMapById[arrival.participantId]?.isSpecial ? (
+                          <Badge variant="secondary">Especial</Badge>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
                       <TableCell className="hidden md:table-cell">
                         {arrival.categoryId ? (
                           <Badge variant="secondary">{categoriesMap[arrival.categoryId] || "Sin categoría"}</Badge>
@@ -1020,6 +1171,7 @@ export function TimingDashboard({
                           <TableHead>#</TableHead>
                           <TableHead>Dorsal</TableHead>
                           <TableHead>Nombre</TableHead>
+                          <TableHead>Especial</TableHead>
                           <TableHead>Tiempo</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -1029,6 +1181,13 @@ export function TimingDashboard({
                             <TableCell className="font-semibold">{index + 1}</TableCell>
                             <TableCell className="font-semibold">{arrival.displayBib}</TableCell>
                             <TableCell>{`${arrival.name} ${arrival.surname}`}</TableCell>
+                            <TableCell>
+                              {participantMapById[arrival.participantId]?.isSpecial ? (
+                                <Badge variant="secondary">Especial</Badge>
+                              ) : (
+                                <span className="text-muted-foreground">-</span>
+                              )}
+                            </TableCell>
                             <TableCell className="font-mono">
                               {formatElapsedTime(arrival.finishTime - arrival.startTime)}
                             </TableCell>
@@ -1081,6 +1240,7 @@ export function TimingDashboard({
                           <TableHead>#</TableHead>
                           <TableHead>Dorsal</TableHead>
                           <TableHead>Nombre</TableHead>
+                          <TableHead>Especial</TableHead>
                           <TableHead className="hidden md:table-cell">Categoría</TableHead>
                           <TableHead>Distancia</TableHead>
                           <TableHead>Tiempo</TableHead>
@@ -1092,6 +1252,13 @@ export function TimingDashboard({
                             <TableCell className="font-semibold">{index + 1}</TableCell>
                             <TableCell className="font-semibold">{arrival.displayBib}</TableCell>
                             <TableCell>{`${arrival.name} ${arrival.surname}`}</TableCell>
+                            <TableCell>
+                              {participantMapById[arrival.participantId]?.isSpecial ? (
+                                <Badge variant="secondary">Especial</Badge>
+                              ) : (
+                                <span className="text-muted-foreground">-</span>
+                              )}
+                            </TableCell>
                             <TableCell className="hidden md:table-cell">
                               {arrival.categoryId ? (
                                 <Badge variant="secondary">{categoriesMap[arrival.categoryId] || "Sin categoría"}</Badge>
@@ -1111,6 +1278,180 @@ export function TimingDashboard({
                 </div>
               ))}
             </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <CardTitle>Clasificaciones para corredores especiales</CardTitle>
+              <CardDescription>
+                Se muestran con detalle en cada clasificación y en apartados exclusivos.
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {specialFinishers.length === 0 && categorySpecialArrivals.length === 0 && genderSpecialArrivals.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Aún no hay corredores especiales en el cronometraje.</p>
+          ) : (
+            <>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-semibold">General especiales</h4>
+                  <Badge variant="secondary">{specialFinishers.length}</Badge>
+                </div>
+                {specialFinishers.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Sin llegadas especiales registradas.</p>
+                ) : (
+                  <div className="overflow-x-auto rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>#</TableHead>
+                          <TableHead>Dorsal</TableHead>
+                          <TableHead>Nombre</TableHead>
+                          <TableHead className="hidden md:table-cell">Categoría</TableHead>
+                          <TableHead>Distancia</TableHead>
+                          <TableHead>Tiempo</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {specialFinishers.map((arrival, index) => (
+                          <TableRow key={`special-${arrival.id}`}>
+                            <TableCell className="font-semibold">{index + 1}</TableCell>
+                            <TableCell className="font-semibold">{arrival.displayBib}</TableCell>
+                            <TableCell className="flex items-center gap-2">
+                              {`${arrival.name} ${arrival.surname}`}
+                              <Badge variant="secondary">Especial</Badge>
+                            </TableCell>
+                            <TableCell className="hidden md:table-cell">
+                              {arrival.categoryId ? (
+                                <Badge variant="secondary">{categoriesMap[arrival.categoryId] || "Sin categoría"}</Badge>
+                              ) : (
+                                <Badge variant="outline">Sin categoría</Badge>
+                              )}
+                            </TableCell>
+                            <TableCell>{arrival.distance}</TableCell>
+                            <TableCell className="font-mono">
+                              {formatElapsedTime(arrival.finishTime - arrival.startTime)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-semibold">Especiales por categoría</h4>
+                  <Badge variant="secondary">{categorySpecialArrivals.length}</Badge>
+                </div>
+                {categorySpecialArrivals.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No hay corredores especiales clasificados por categoría.</p>
+                ) : (
+                  <div className="space-y-4">
+                    {categorySpecialArrivals.map((category) => (
+                      <div key={`special-cat-${category.key}`} className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <h5 className="font-semibold">{category.label}</h5>
+                          <Badge variant="secondary">{category.members.length}</Badge>
+                        </div>
+                        <div className="overflow-x-auto rounded-md border">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>#</TableHead>
+                                <TableHead>Dorsal</TableHead>
+                                <TableHead>Nombre</TableHead>
+                                <TableHead>Tiempo</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {category.members.map((arrival, index) => (
+                                <TableRow key={`special-cat-${category.key}-${arrival.id}`}>
+                                  <TableCell className="font-semibold">{index + 1}</TableCell>
+                                  <TableCell className="font-semibold">{arrival.displayBib}</TableCell>
+                                  <TableCell className="flex items-center gap-2">
+                                    {`${arrival.name} ${arrival.surname}`}
+                                    <Badge variant="secondary">Especial</Badge>
+                                  </TableCell>
+                                  <TableCell className="font-mono">
+                                    {formatElapsedTime(arrival.finishTime - arrival.startTime)}
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-semibold">Especiales por sexo</h4>
+                  <Badge variant="secondary">{genderSpecialArrivals.length}</Badge>
+                </div>
+                {genderSpecialArrivals.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No hay corredores especiales clasificados por sexo.</p>
+                ) : (
+                  <div className="space-y-4">
+                    {genderSpecialArrivals.map((gender) => (
+                      <div key={`special-gender-${gender.key}`} className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <h5 className="font-semibold">{gender.label}</h5>
+                          <Badge variant="secondary">{gender.members.length}</Badge>
+                        </div>
+                        <div className="overflow-x-auto rounded-md border">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>#</TableHead>
+                                <TableHead>Dorsal</TableHead>
+                                <TableHead>Nombre</TableHead>
+                                <TableHead className="hidden md:table-cell">Categoría</TableHead>
+                                <TableHead>Distancia</TableHead>
+                                <TableHead>Tiempo</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {gender.members.map((arrival, index) => (
+                                <TableRow key={`special-gender-${gender.key}-${arrival.id}`}>
+                                  <TableCell className="font-semibold">{index + 1}</TableCell>
+                                  <TableCell className="font-semibold">{arrival.displayBib}</TableCell>
+                                  <TableCell className="flex items-center gap-2">
+                                    {`${arrival.name} ${arrival.surname}`}
+                                    <Badge variant="secondary">Especial</Badge>
+                                  </TableCell>
+                                  <TableCell className="hidden md:table-cell">
+                                    {arrival.categoryId ? (
+                                      <Badge variant="secondary">{categoriesMap[arrival.categoryId] || "Sin categoría"}</Badge>
+                                    ) : (
+                                      <Badge variant="outline">Sin categoría</Badge>
+                                    )}
+                                  </TableCell>
+                                  <TableCell>{arrival.distance}</TableCell>
+                                  <TableCell className="font-mono">
+                                    {formatElapsedTime(arrival.finishTime - arrival.startTime)}
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
