@@ -210,6 +210,7 @@ export function CompetitorsManager({
   const [bulkBibMaxAge, setBulkBibMaxAge] = useState<string>("");
   const [includeAssignedBibs, setIncludeAssignedBibs] = useState(false);
   const [isAssigningBibs, setIsAssigningBibs] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [dniQuery, setDniQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Participant[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
@@ -249,6 +250,23 @@ export function CompetitorsManager({
     return [...categories].sort((a, b) => a.name.localeCompare(b.name));
   }, [categories]);
 
+  const filteredParticipants = useMemo(() => {
+    const term = searchQuery.trim().toLowerCase();
+    if (term.length < 3) return participants;
+    return participants.filter((participant) => {
+      return (
+        participant.dni.toLowerCase().includes(term) ||
+        participant.surname.toLowerCase().includes(term) ||
+        participant.name.toLowerCase().includes(term)
+      );
+    });
+  }, [participants, searchQuery]);
+
+  const selectableParticipants = useMemo(
+    () => filteredParticipants.filter((participant) => !participant.replacedById),
+    [filteredParticipants]
+  );
+
   const handleViewerSearch = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const normalized = dniQuery.trim();
@@ -258,7 +276,8 @@ export function CompetitorsManager({
       return;
     }
     const matches = participants.filter(
-      (participant) => (participant.dni ?? "").trim().toLowerCase() === normalized.toLowerCase()
+      (participant) =>
+        !participant.replacedById && (participant.dni ?? "").trim().toLowerCase() === normalized.toLowerCase()
     );
     setSearchResults(matches);
   };
@@ -267,7 +286,7 @@ export function CompetitorsManager({
     setSelectedParticipants((prev) => {
       const next = new Set<string>();
       participants.forEach((participant) => {
-        if (prev.has(participant.id)) {
+        if (prev.has(participant.id) && !participant.replacedById) {
           next.add(participant.id);
         }
       });
@@ -367,7 +386,15 @@ export function CompetitorsManager({
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (id: string, isReplaced?: boolean) => {
+    if (isReplaced) {
+      toast({
+        variant: "destructive",
+        title: "Acción no permitida",
+        description: "No puedes modificar un participante que ya fue reemplazado.",
+      });
+      return;
+    }
     try {
       await deleteParticipant(id);
       toast({ title: "Participante Eliminado", description: "El participante ha sido eliminado correctamente." });
@@ -767,6 +794,8 @@ export function CompetitorsManager({
   const isAdmin = role === "admin";
 
   const toggleSelection = (id: string) => {
+    const participant = participants.find((item) => item.id === id);
+    if (!participant || participant.replacedById) return;
     setSelectedParticipants((prev) => {
       const next = new Set(prev);
       if (next.has(id)) {
@@ -783,23 +812,37 @@ export function CompetitorsManager({
       setSelectedParticipants(new Set());
       return;
     }
-    setSelectedParticipants(new Set(participants.map((p) => p.id)));
+    setSelectedParticipants(new Set(selectableParticipants.map((p) => p.id)));
   };
 
   const selectedCount = selectedParticipants.size;
+  const allVisibleSelected =
+    selectableParticipants.length > 0 &&
+    selectableParticipants.every((participant) => selectedParticipants.has(participant.id));
 
   const renderParticipantRow = (p: Participant) => {
     const age = calculateAge(p.birthDate, raceDate, ageCalculationMethod);
     const isSelected = selectedParticipants.has(p.id);
+    const isReplaced = Boolean(p.replacedById);
     return (
-      <TableRow key={p.id} data-selected={isSelected}>
+      <TableRow key={p.id} data-selected={isSelected} className={isReplaced ? "opacity-70" : undefined}>
         {isAdmin && (
           <TableCell className="w-12">
-            <Checkbox checked={isSelected} onCheckedChange={(checked) => toggleSelection(p.id)} aria-label="Seleccionar participante" />
+            <Checkbox
+              checked={isSelected}
+              disabled={isReplaced}
+              onCheckedChange={(checked) => toggleSelection(p.id)}
+              aria-label="Seleccionar participante"
+            />
           </TableCell>
         )}
         <TableCell className="font-medium">{p.bibNumber}</TableCell>
-        <TableCell className="font-medium">{`${p.name} ${p.surname}`}</TableCell>
+        <TableCell className="font-medium">
+          <div className="flex items-center gap-2">
+            <span>{`${p.name} ${p.surname}`}</span>
+            {isReplaced && <Badge variant="outline">Reemplazado</Badge>}
+          </div>
+        </TableCell>
         <TableCell className="hidden md:table-cell">{age ?? "-"}</TableCell>
         <TableCell className="hidden md:table-cell">{p.gender === "Male" ? "Masculino" : p.gender === "Female" ? "Femenino" : "Otro"}</TableCell>
         <TableCell>{p.distance}</TableCell>
@@ -818,36 +861,9 @@ export function CompetitorsManager({
         <TableCell className="hidden xl:table-cell">{[p.city, p.province, p.country].filter(Boolean).join(", ") || "-"}</TableCell>
         {isAdmin && (
           <TableCell className="text-right">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8">
-                  <MoreVertical className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => handleOpenDialog(p)}>
-                  <Edit className="mr-2 h-4 w-4" /> Editar
-                </DropdownMenuItem>
-                <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(p.id)}>
-                  <Trash2 className="mr-2 h-4 w-4" /> Eliminar
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </TableCell>
-        )}
-      </TableRow>
-    );
-  };
-
-  const renderParticipantCard = (p: Participant) => {
-    const age = calculateAge(p.birthDate, raceDate, ageCalculationMethod);
-    const isSelected = selectedParticipants.has(p.id);
-    return (
-      <Card key={p.id} data-selected={isSelected}>
-        <CardContent className="p-4 space-y-3">
-          {isAdmin && (
-            <div className="flex items-center justify-between">
-              <Checkbox checked={isSelected} onCheckedChange={() => toggleSelection(p.id)} aria-label="Seleccionar participante" />
+            {isReplaced ? (
+              <Badge variant="outline" className="text-xs">Cambio registrado</Badge>
+            ) : (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -858,16 +874,60 @@ export function CompetitorsManager({
                   <DropdownMenuItem onClick={() => handleOpenDialog(p)}>
                     <Edit className="mr-2 h-4 w-4" /> Editar
                   </DropdownMenuItem>
-                  <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(p.id)}>
+                  <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(p.id, isReplaced)}>
                     <Trash2 className="mr-2 h-4 w-4" /> Eliminar
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+            )}
+          </TableCell>
+        )}
+      </TableRow>
+    );
+  };
+
+  const renderParticipantCard = (p: Participant) => {
+    const age = calculateAge(p.birthDate, raceDate, ageCalculationMethod);
+    const isSelected = selectedParticipants.has(p.id);
+    const isReplaced = Boolean(p.replacedById);
+    return (
+      <Card key={p.id} data-selected={isSelected} className={isReplaced ? "opacity-70" : undefined}>
+        <CardContent className="p-4 space-y-3">
+          {isAdmin && (
+            <div className="flex items-center justify-between">
+              <Checkbox
+                checked={isSelected}
+                disabled={isReplaced}
+                onCheckedChange={() => toggleSelection(p.id)}
+                aria-label="Seleccionar participante"
+              />
+              {isReplaced ? (
+                <Badge variant="outline" className="text-xs">Reemplazado</Badge>
+              ) : (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => handleOpenDialog(p)}>
+                      <Edit className="mr-2 h-4 w-4" /> Editar
+                    </DropdownMenuItem>
+                    <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(p.id, isReplaced)}>
+                      <Trash2 className="mr-2 h-4 w-4" /> Eliminar
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
             </div>
           )}
           <div>
             <p className="text-sm font-semibold text-primary">#{p.bibNumber}</p>
-            <h3 className="font-semibold">{`${p.name} ${p.surname}`}</h3>
+            <h3 className="font-semibold flex items-center gap-2">
+              <span>{`${p.name} ${p.surname}`}</span>
+              {isReplaced && <Badge variant="outline">Reemplazado</Badge>}
+            </h3>
             <p className="text-sm text-muted-foreground">
               {age ?? "-"} años | {p.distance} | {p.gender === "Male" ? "Masculino" : p.gender === "Female" ? "Femenino" : "Otro"}
             </p>
@@ -994,6 +1054,16 @@ export function CompetitorsManager({
           <p className="text-sm text-muted-foreground">
             Gestionando competidores de <span className="font-semibold text-foreground">{raceName}</span>
           </p>
+          <div className="space-y-2">
+            <Label htmlFor="participant-search">Buscar competidores</Label>
+            <Input
+              id="participant-search"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="DNI, apellido o nombre"
+            />
+            <p className="text-xs text-muted-foreground">Autobúsqueda desde el tercer caracter.</p>
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             {isAdmin && (
               <>
@@ -1013,14 +1083,14 @@ export function CompetitorsManager({
                 <Button
                   variant="outline"
                   onClick={handleOpenBibDialog}
-                  disabled={participants.length === 0}
+                  disabled={selectableParticipants.length === 0}
                 >
                   <Hash className="mr-2 h-4 w-4" /> Asignar dorsales
                 </Button>
                 <Button
                   variant="secondary"
                   onClick={() => setIsAssignmentDialogOpen(true)}
-                  disabled={participants.length === 0}
+                  disabled={selectableParticipants.length === 0}
                 >
                   <Sparkles className="mr-2 h-4 w-4" /> Asignar categorías
                 </Button>
@@ -1043,7 +1113,8 @@ export function CompetitorsManager({
                     {isAdmin && (
                       <TableHead className="w-12">
                         <Checkbox
-                          checked={selectedParticipants.size === participants.length && participants.length > 0}
+                          checked={allVisibleSelected}
+                          disabled={selectableParticipants.length === 0}
                           onCheckedChange={(checked) => toggleSelectAll(Boolean(checked))}
                           aria-label="Seleccionar todos"
                         />
@@ -1060,12 +1131,12 @@ export function CompetitorsManager({
                     {isAdmin && <TableHead className="text-right">Acciones</TableHead>}
                   </TableRow>
                 </TableHeader>
-                <TableBody>{participants.map((p) => renderParticipantRow(p))}</TableBody>
+                <TableBody>{filteredParticipants.map((p) => renderParticipantRow(p))}</TableBody>
               </Table>
             </div>
           ) : (
             <div className="grid gap-4">
-              {participants.map((p) => renderParticipantCard(p))}
+              {filteredParticipants.map((p) => renderParticipantCard(p))}
             </div>
           )}
         </TabsContent>

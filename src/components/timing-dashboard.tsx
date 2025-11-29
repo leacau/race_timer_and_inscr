@@ -339,6 +339,11 @@ export function TimingDashboard({
     }, {} as Record<string, string>);
   }, [categories]);
 
+  const activeParticipants = useMemo(
+    () => participants.filter((participant) => !participant.replacedById),
+    [participants]
+  );
+
   const getGroupStart = (groupParticipants: Participant[]) => {
     const startTimes = groupParticipants.map((p) => p.startTime).filter(Boolean) as number[];
     if (startTimes.length === 0) return null;
@@ -347,12 +352,12 @@ export function TimingDashboard({
 
   const resolveParticipantsForGroup = (group: TimingGroup) => {
     if (mode === "general") {
-      return participants;
+      return activeParticipants;
     }
     if (mode === "distance") {
-      return participants.filter((participant) => participant.distance === group.actionGroupId);
+      return activeParticipants.filter((participant) => participant.distance === group.actionGroupId);
     }
-    return participants.filter((participant) => {
+    return activeParticipants.filter((participant) => {
       if (!group.actionGroupId) {
         return !participant.categoryId;
       }
@@ -361,16 +366,16 @@ export function TimingDashboard({
   };
 
   const groups = useMemo<TimingGroup[]>(() => {
-    if (participants.length === 0) return [];
+    if (activeParticipants.length === 0) return [];
 
     if (mode === "general") {
       return [
         {
           key: "general",
           label: "Cronómetro general",
-          participantCount: participants.length,
-          finishedCount: participants.filter((p) => p.finishTime).length,
-          startTime: getGroupStart(participants),
+          participantCount: activeParticipants.length,
+          finishedCount: activeParticipants.filter((p) => p.finishTime).length,
+          startTime: getGroupStart(activeParticipants),
           actionGroupId: null,
         },
       ];
@@ -378,7 +383,7 @@ export function TimingDashboard({
 
     if (mode === "distance") {
       const map = new Map<string, Participant[]>();
-      participants.forEach((participant) => {
+      activeParticipants.forEach((participant) => {
         const current = map.get(participant.distance) ?? [];
         current.push(participant);
         map.set(participant.distance, current);
@@ -397,7 +402,7 @@ export function TimingDashboard({
     }
 
     const map = new Map<string, { label: string; members: Participant[]; actionGroupId: string | null }>();
-    participants.forEach((participant) => {
+    activeParticipants.forEach((participant) => {
       const categoryId = participant.categoryId ?? "__sin_categoria__";
       const label = participant.categoryId ? categoriesMap[participant.categoryId] ?? "Sin categoría" : "Sin categoría";
       if (!map.has(categoryId)) {
@@ -416,7 +421,7 @@ export function TimingDashboard({
         startTime: getGroupStart(value.members),
         actionGroupId: value.actionGroupId,
       }));
-  }, [mode, participants, categoriesMap]);
+  }, [mode, activeParticipants, categoriesMap]);
 
   useEffect(() => {
     setStoppedGroups((prev) => {
@@ -442,7 +447,7 @@ export function TimingDashboard({
   }, [groups]);
 
   const finisherEntries = useMemo<ArrivalEntry[]>(() => {
-    return participants
+    return activeParticipants
       .filter((participant) => participant.finishTime && participant.startTime)
       .map((participant) => ({
         id: participant.id,
@@ -458,14 +463,14 @@ export function TimingDashboard({
         finishTime: participant.finishTime!,
         isSpecial: participant.isSpecial ?? false,
       }));
-  }, [participants]);
+  }, [activeParticipants]);
 
   const participantMapById = useMemo(() => {
-    return participants.reduce((acc, participant) => {
+    return activeParticipants.reduce((acc, participant) => {
       acc[participant.id] = participant;
       return acc;
     }, {} as Record<string, Participant>);
-  }, [participants]);
+  }, [activeParticipants]);
 
   const finishers = useMemo(() => {
     return [...finisherEntries, ...duplicateArrivals].sort((a, b) => a.finishTime - b.finishTime);
@@ -618,7 +623,7 @@ export function TimingDashboard({
     event.preventDefault();
     if (!manualBib.trim()) return;
     const bib = manualBib.trim();
-    const participant = participants.find((p) => p.bibNumber === bib);
+    const participant = activeParticipants.find((p) => p.bibNumber === bib);
     if (!participant) {
       toast({ variant: "destructive", title: "Dorsal no encontrado", description: `No existe el dorsal ${bib}.` });
       setManualBib("");

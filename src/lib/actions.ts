@@ -119,7 +119,7 @@ export async function replaceParticipant(
   raceDate: Date,
   ageCalculationMethod: AgeCalculationMethod,
   raceId: string
-) {
+): Promise<{ newParticipantId: string }> {
   const original = await db.getParticipant(participantId);
   if (!original) {
     throw new Error("Participante no encontrado para reemplazar.");
@@ -127,19 +127,6 @@ export async function replaceParticipant(
 
   const categories = await db.getCategories(raceId);
   const categoryId = assignCategory(replacement, categories, raceDate, ageCalculationMethod);
-
-  const nextSnapshot: ParticipantSnapshot = {
-    id: original.id,
-    bibNumber: original.bibNumber,
-    chipNumber: original.chipNumber,
-    name: replacement.name,
-    surname: replacement.surname,
-    dni: replacement.dni,
-    gender: replacement.gender,
-    distance: replacement.distance,
-    birthDate: replacement.birthDate,
-    categoryId,
-  };
 
   const previousSnapshot: ParticipantSnapshot = {
     id: original.id,
@@ -154,7 +141,8 @@ export async function replaceParticipant(
     categoryId: original.categoryId,
   };
 
-  const dataToUpdate: Partial<ParticipantFirestoreData> = {
+  const newParticipantData: ParticipantFirestoreData = {
+    raceId,
     ...replacement,
     categoryId,
     chipNumber: original.chipNumber,
@@ -164,16 +152,35 @@ export async function replaceParticipant(
     province: replacement.province || null,
     country: replacement.country || null,
     kitDelivered: original.kitDelivered ?? false,
-    replacedFromId: original.replacedFromId ?? null,
-    replacedById: original.replacedById ?? null,
+    replacedFromId: original.id,
+    replacedById: null,
+    startTime: original.startTime,
+    finishTime: original.finishTime,
   };
 
-  await db.updateParticipant(participantId, dataToUpdate);
-  await db.addRunnerChange({ raceId, participantId, previous: previousSnapshot, next: nextSnapshot });
+  const newParticipantId = await db.addParticipant(newParticipantData);
+
+  const nextSnapshot: ParticipantSnapshot = {
+    id: newParticipantId,
+    bibNumber: original.bibNumber,
+    chipNumber: original.chipNumber,
+    name: replacement.name,
+    surname: replacement.surname,
+    dni: replacement.dni,
+    gender: replacement.gender,
+    distance: replacement.distance,
+    birthDate: replacement.birthDate,
+    categoryId,
+  };
+
+  await db.updateParticipant(participantId, { replacedById: newParticipantId });
+  await db.addRunnerChange({ raceId, participantId: newParticipantId, previous: previousSnapshot, next: nextSnapshot });
 
   revalidatePath("/");
   revalidatePath(`/races/${raceId}`);
   revalidatePath(`/kits/${raceId}`);
+
+  return { newParticipantId };
 }
 
 export async function bulkDeleteParticipants(ids: string[]) {
@@ -196,14 +203,15 @@ export async function updateParticipantTime(
 
 export async function startTimingGroup(raceId: string, mode: TimingMode, groupId?: string | null) {
   const participants = await db.getParticipants(raceId);
+  const activeParticipants = participants.filter((participant) => !participant.replacedById);
   let targets: Participant[] = [];
 
   if (mode === 'general') {
-    targets = participants;
+    targets = activeParticipants;
   } else if (mode === 'distance') {
-    targets = participants.filter((p) => p.distance === groupId);
+    targets = activeParticipants.filter((p) => p.distance === groupId);
   } else {
-    targets = participants.filter((p) => p.categoryId === (groupId ?? null));
+    targets = activeParticipants.filter((p) => p.categoryId === (groupId ?? null));
   }
 
   if (targets.length === 0) {
@@ -229,14 +237,15 @@ export async function startTimingGroup(raceId: string, mode: TimingMode, groupId
 
 export async function resetTimingGroup(raceId: string, mode: TimingMode, groupId?: string | null) {
   const participants = await db.getParticipants(raceId);
+  const activeParticipants = participants.filter((participant) => !participant.replacedById);
   let targets: Participant[] = [];
 
   if (mode === 'general') {
-    targets = participants;
+    targets = activeParticipants;
   } else if (mode === 'distance') {
-    targets = participants.filter((p) => p.distance === groupId);
+    targets = activeParticipants.filter((p) => p.distance === groupId);
   } else {
-    targets = participants.filter((p) => (p.categoryId ?? null) === (groupId ?? null));
+    targets = activeParticipants.filter((p) => (p.categoryId ?? null) === (groupId ?? null));
   }
 
   if (targets.length === 0) {

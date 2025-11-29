@@ -128,6 +128,14 @@ export function KitDelivery({ race, participants, categories }: KitDeliveryProps
   };
 
   const handleToggleDelivered = async (participant: Participant, delivered: boolean) => {
+    if (participant.replacedById) {
+      toast({
+        variant: "destructive",
+        title: "Acción no permitida",
+        description: "No puedes actualizar el kit de un participante que fue reemplazado.",
+      });
+      return;
+    }
     try {
       await toggleKitDelivered(participant.id, delivered, race.id);
       setLocalParticipants((prev) =>
@@ -143,18 +151,44 @@ export function KitDelivery({ race, participants, categories }: KitDeliveryProps
   const handleReplacementSubmit = form.handleSubmit(async (values) => {
     if (!selected) return;
     try {
-      await replaceParticipant(selected.id, values, raceDate, ageCalculationMethod, race.id);
+      const { newParticipantId } = await replaceParticipant(
+        selected.id,
+        values,
+        raceDate,
+        ageCalculationMethod,
+        race.id
+      );
       const nextCategory = assignCategory(values, categories, raceDate, ageCalculationMethod);
-      const updated: Participant = {
-        ...selected,
-        ...values,
+      const newParticipant: Participant = {
+        id: newParticipantId,
+        raceId: race.id,
+        bibNumber: selected.bibNumber,
+        chipNumber: selected.chipNumber,
+        name: values.name,
+        surname: values.surname,
+        dni: values.dni,
+        gender: values.gender,
+        distance: values.distance,
+        birthDate: values.birthDate,
         categoryId: nextCategory,
+        startTime: selected.startTime,
+        finishTime: selected.finishTime,
         city: values.city || null,
         province: values.province || null,
         country: values.country || null,
+        isSpecial: Boolean(values.isSpecial),
+        kitDelivered: selected.kitDelivered ?? false,
+        replacedFromId: selected.id,
+        replacedById: null,
       };
-      setLocalParticipants((prev) => prev.map((p) => (p.id === selected.id ? updated : p)));
-      setSelected(updated);
+
+      setLocalParticipants((prev) => {
+        const updatedOriginal = prev.map((p) =>
+          p.id === selected.id ? { ...p, replacedById: newParticipantId } : p
+        );
+        return [...updatedOriginal, newParticipant];
+      });
+      setSelected(newParticipant);
       toast({ title: "Cambio registrado", description: "El corredor fue reemplazado y mantiene su dorsal y chip." });
       setIsReplacementOpen(false);
     } catch (error) {
@@ -210,35 +244,44 @@ export function KitDelivery({ race, participants, categories }: KitDeliveryProps
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filtered.map((participant) => (
-                    <TableRow
-                      key={participant.id}
-                      className="cursor-pointer"
-                      onClick={() => {
-                        setSelected(participant);
-                        resetReplacementForm(participant);
-                      }}
-                    >
-                      <TableCell className="font-semibold">{participant.bibNumber}</TableCell>
-                      <TableCell>{`${participant.name} ${participant.surname}`}</TableCell>
-                      <TableCell>{participant.dni}</TableCell>
-                      <TableCell>{participant.distance}</TableCell>
-                      <TableCell>
-                        {participant.categoryId ? (
-                          <Badge variant="secondary">{categoryMap[participant.categoryId] || "Sin categoría"}</Badge>
-                        ) : (
-                          <Badge variant="outline">Sin categoría</Badge>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {participant.kitDelivered ? (
-                          <Badge variant="default">Entregado</Badge>
-                        ) : (
-                          <Badge variant="outline">Pendiente</Badge>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))
+                  filtered.map((participant) => {
+                    const isReplaced = Boolean(participant.replacedById);
+                    return (
+                      <TableRow
+                        key={participant.id}
+                        className={isReplaced ? "cursor-not-allowed opacity-60" : "cursor-pointer"}
+                        onClick={() => {
+                          if (isReplaced) return;
+                          setSelected(participant);
+                          resetReplacementForm(participant);
+                        }}
+                      >
+                        <TableCell className="font-semibold">
+                          <div className="flex items-center gap-2">
+                            <span>{participant.bibNumber}</span>
+                            {isReplaced && <Badge variant="outline">Reemplazado</Badge>}
+                          </div>
+                        </TableCell>
+                        <TableCell>{`${participant.name} ${participant.surname}`}</TableCell>
+                        <TableCell>{participant.dni}</TableCell>
+                        <TableCell>{participant.distance}</TableCell>
+                        <TableCell>
+                          {participant.categoryId ? (
+                            <Badge variant="secondary">{categoryMap[participant.categoryId] || "Sin categoría"}</Badge>
+                          ) : (
+                            <Badge variant="outline">Sin categoría</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {participant.kitDelivered ? (
+                            <Badge variant="default">Entregado</Badge>
+                          ) : (
+                            <Badge variant="outline">Pendiente</Badge>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
@@ -288,11 +331,17 @@ export function KitDelivery({ race, participants, categories }: KitDeliveryProps
                 <Switch
                   checked={Boolean(selected.kitDelivered)}
                   onCheckedChange={(checked) => handleToggleDelivered(selected, checked)}
+                  disabled={Boolean(selected.replacedById)}
                   aria-label="Kit entregado"
                 />
               </div>
 
-              <Button variant="secondary" className="w-full" onClick={() => setIsReplacementOpen(true)}>
+              <Button
+                variant="secondary"
+                className="w-full"
+                onClick={() => setIsReplacementOpen(true)}
+                disabled={Boolean(selected.replacedById)}
+              >
                 <ArrowLeftRightIcon className="mr-2 h-4 w-4" /> Cambio de corredor
               </Button>
             </div>
