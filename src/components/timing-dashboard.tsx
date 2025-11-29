@@ -103,17 +103,15 @@ const wrapText = (line: string, maxChars = 100) => {
 };
 
 const encodePdfText = (text: string) => {
-  const codePoints = Array.from(text);
-  const bytes: number[] = [0xfe, 0xff];
+  const bytes: number[] = [];
 
-  for (const char of codePoints) {
+  for (const char of Array.from(text)) {
     const code = char.codePointAt(0)!;
-    if (code > 0xffff) {
-      const high = Math.floor((code - 0x10000) / 0x400) + 0xd800;
-      const low = ((code - 0x10000) % 0x400) + 0xdc00;
-      bytes.push((high >> 8) & 0xff, high & 0xff, (low >> 8) & 0xff, low & 0xff);
+    if (code <= 0xff) {
+      bytes.push(code);
     } else {
-      bytes.push((code >> 8) & 0xff, code & 0xff);
+      // Fallback for characters outside WinAnsi/cp1252 range
+      bytes.push("?".charCodeAt(0));
     }
   }
 
