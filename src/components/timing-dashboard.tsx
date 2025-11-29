@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { AppContext } from "@/context/app-context";
 import { formatElapsedTime } from "@/lib/utils";
@@ -324,6 +325,7 @@ export function TimingDashboard({
   const [duplicateArrivals, setDuplicateArrivals] = useState<ArrivalEntry[]>([]);
   const [duplicateCounters, setDuplicateCounters] = useState<Record<string, number>>({});
   const raceName = activeRace?.name ?? "Carrera";
+  const [viewerTab, setViewerTab] = useState<"general" | "categories" | "special">("general");
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 500);
@@ -931,11 +933,16 @@ export function TimingDashboard({
     downloadBlob(pdf, `clasificacion_genero_${timestamp}.pdf`);
   };
 
+  const showGeneralSections = isAdmin || viewerTab === "general";
+  const showCategorySections = isAdmin || viewerTab === "categories";
+  const showSpecialSections = isAdmin || viewerTab === "special";
+
   return (
     <div className="space-y-6">
       <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
         Cronometrando: <span className="font-semibold text-foreground">{raceName}</span>
       </div>
+      {isAdmin && (
       <Card>
         <CardHeader>
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
@@ -980,7 +987,9 @@ export function TimingDashboard({
           </RadioGroup>
         </CardContent>
       </Card>
+      )}
 
+      {isAdmin && (
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {groups.length === 0 && (
           <div className="col-span-full text-center text-sm text-muted-foreground">
@@ -1040,6 +1049,7 @@ export function TimingDashboard({
           </Card>
         ))}
       </div>
+      )}
 
       {isAdmin && (
         <Card>
@@ -1063,6 +1073,25 @@ export function TimingDashboard({
         </Card>
       )}
 
+      {!isAdmin && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Clasificación en vivo</CardTitle>
+            <CardDescription>Elige la vista deseada para los resultados.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Tabs value={viewerTab} onValueChange={(value) => setViewerTab(value as "general" | "categories" | "special")}>
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="general">General</TabsTrigger>
+                <TabsTrigger value="categories">Categorías</TabsTrigger>
+                <TabsTrigger value="special">Especial</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </CardContent>
+        </Card>
+      )}
+
+      {showGeneralSections && (
       <Card>
         <CardHeader>
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
@@ -1131,7 +1160,9 @@ export function TimingDashboard({
           )}
         </CardContent>
       </Card>
+      )}
 
+      {showCategorySections && (
       <Card>
         <CardHeader>
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
@@ -1200,7 +1231,9 @@ export function TimingDashboard({
           )}
         </CardContent>
       </Card>
+      )}
 
+      {showGeneralSections && (
       <Card>
         <CardHeader>
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
@@ -1279,7 +1312,9 @@ export function TimingDashboard({
           )}
         </CardContent>
       </Card>
+      )}
 
+      {showSpecialSections && (
       <Card>
         <CardHeader>
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
@@ -1453,6 +1488,7 @@ export function TimingDashboard({
           )}
         </CardContent>
       </Card>
+      )}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, useTransition } from "react";
+import { useContext, useMemo, useState, useTransition } from "react";
 import * as z from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -17,6 +17,7 @@ import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { Trash2, Plus, Pencil } from "lucide-react";
+import { AppContext } from "@/context/app-context";
 
 const raceSchema = z.object({
   name: z.string().min(3, "El nombre debe tener al menos 3 caracteres"),
@@ -27,6 +28,8 @@ type RaceFormValues = z.infer<typeof raceSchema>;
 
 export function RacesManager({ races }: { races: Race[] }) {
   const { toast } = useToast();
+  const { role } = useContext(AppContext);
+  const isAdmin = role === "admin";
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRace, setEditingRace] = useState<Race | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -87,11 +90,17 @@ export function RacesManager({ races }: { races: Race[] }) {
       <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <CardTitle>Mis carreras</CardTitle>
-          <p className="text-sm text-muted-foreground">Crea múltiples carreras y administra sus fechas oficiales.</p>
+          <p className="text-sm text-muted-foreground">
+            {isAdmin
+              ? "Crea múltiples carreras y administra sus fechas oficiales."
+              : "Consulta las carreras disponibles y abre sus detalles."}
+          </p>
         </div>
-        <Button onClick={() => handleOpen()} size="sm">
-          <Plus className="mr-2 h-4 w-4" /> Nueva carrera
-        </Button>
+        {isAdmin && (
+          <Button onClick={() => handleOpen()} size="sm">
+            <Plus className="mr-2 h-4 w-4" /> Nueva carrera
+          </Button>
+        )}
       </CardHeader>
       <CardContent>
         {sortedRaces.length === 0 ? (
@@ -115,12 +124,16 @@ export function RacesManager({ races }: { races: Race[] }) {
                       <Button asChild size="sm">
                         <Link href={`/races/${race.id}`}>Abrir</Link>
                       </Button>
-                      <Button variant="outline" size="icon" onClick={() => handleOpen(race)}>
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button variant="outline" size="icon" onClick={() => handleDelete(race)}>
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
+                      {isAdmin && (
+                        <>
+                          <Button variant="outline" size="icon" onClick={() => handleOpen(race)}>
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button variant="outline" size="icon" onClick={() => handleDelete(race)}>
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}

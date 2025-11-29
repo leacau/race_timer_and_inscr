@@ -196,6 +196,9 @@ export function CompetitorsManager({
     distance: "5k",
   });
   const [isAssigning, setIsAssigning] = useState(false);
+  const [dniQuery, setDniQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<Participant[]>([]);
+  const [hasSearched, setHasSearched] = useState(false);
 
   const categoryMap = useMemo(() => {
     return categories.reduce((acc, category) => {
@@ -230,6 +233,20 @@ export function CompetitorsManager({
   const orderedCategories = useMemo(() => {
     return [...categories].sort((a, b) => a.name.localeCompare(b.name));
   }, [categories]);
+
+  const handleViewerSearch = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const normalized = dniQuery.trim();
+    setHasSearched(true);
+    if (!normalized) {
+      setSearchResults([]);
+      return;
+    }
+    const matches = participants.filter(
+      (participant) => (participant.dni ?? "").trim().toLowerCase() === normalized.toLowerCase()
+    );
+    setSearchResults(matches);
+  };
 
   useEffect(() => {
     setSelectedParticipants((prev) => {
@@ -767,6 +784,96 @@ export function CompetitorsManager({
       </Card>
     );
   };
+
+  if (!isAdmin) {
+    return (
+      <div className="space-y-4">
+        <p className="mb-2 text-sm text-muted-foreground">
+          Consulta de participantes de <span className="font-semibold text-foreground">{raceName}</span>
+        </p>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Búsqueda por DNI</CardTitle>
+            <CardDescription>Introduce el DNI exacto y presiona buscar para ver coincidencias.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleViewerSearch} className="flex flex-col gap-4 sm:flex-row sm:items-end">
+              <div className="flex-1 space-y-2">
+                <Label htmlFor="dni-search">DNI</Label>
+                <Input
+                  id="dni-search"
+                  value={dniQuery}
+                  onChange={(event) => setDniQuery(event.target.value)}
+                  placeholder="Ej: 30123456"
+                />
+              </div>
+              <Button type="submit" className="sm:w-32">
+                Buscar
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+
+        {hasSearched && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Resultado de la búsqueda</CardTitle>
+              <CardDescription>
+                {searchResults.length === 0
+                  ? "No se encontraron participantes con ese DNI."
+                  : `${searchResults.length} participante(s) encontrado(s).`}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {searchResults.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Intenta con otro DNI.</p>
+              ) : (
+                <div className="overflow-x-auto rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Dorsal</TableHead>
+                        <TableHead>Nombre</TableHead>
+                        <TableHead>Género</TableHead>
+                        <TableHead>Categoría</TableHead>
+                        <TableHead>Distancia</TableHead>
+                        <TableHead>Especial</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {searchResults.map((p) => (
+                        <TableRow key={p.id}>
+                          <TableCell className="font-semibold">{p.bibNumber}</TableCell>
+                          <TableCell className="font-semibold">{`${p.name} ${p.surname}`}</TableCell>
+                          <TableCell>{p.gender === "Male" ? "Masculino" : p.gender === "Female" ? "Femenino" : "Otro"}</TableCell>
+                          <TableCell>
+                            {p.categoryId ? (
+                              <Badge variant="secondary">{categoryMap[p.categoryId] || "Sin categoría"}</Badge>
+                            ) : (
+                              <Badge variant="outline">Sin categoría</Badge>
+                            )}
+                          </TableCell>
+                          <TableCell>{p.distance}</TableCell>
+                          <TableCell>
+                            {p.isSpecial ? (
+                              <Badge variant="secondary">Especial</Badge>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full">

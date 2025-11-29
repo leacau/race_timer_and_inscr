@@ -24,7 +24,7 @@ export const AppContext = createContext<AppContextType>({
 });
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [role, setRole] = useState<Role>("admin"); // Default to admin for demonstration
+  const [role, setRole] = useState<Role>("viewer");
   const [raceDate, setRaceDate] = useState<Date>(new Date());
   const [ageCalculationMethod, setAgeCalculationMethod] = useState<AgeCalculationMethod>('raceDay');
 

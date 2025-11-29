@@ -8,6 +8,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TimingDashboard } from "./timing-dashboard";
 import { CompetitorsManager } from "./competitors-manager";
 import { CategoryManager } from "./category-manager";
+import { useContext } from "react";
+import { AppContext } from "@/context/app-context";
 
 export function RaceTabs({
   race,
@@ -18,6 +20,9 @@ export function RaceTabs({
   participants: Participant[];
   categories: Category[];
 }) {
+  const { role } = useContext(AppContext);
+  const isAdmin = role === "admin";
+
   return (
     <div className="space-y-4">
       <div className="space-y-2">
@@ -31,19 +36,21 @@ export function RaceTabs({
       </div>
 
       <Tabs defaultValue="timing" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-3 sm:w-auto">
+        <TabsList className={`grid w-full ${isAdmin ? "grid-cols-3" : "grid-cols-2"} sm:w-auto`}>
           <TabsTrigger value="timing" className="flex items-center gap-2">
             <TimerIcon className="h-4 w-4" />
-            Cronometraje
+            {isAdmin ? "Cronometraje" : "Clasificación"}
           </TabsTrigger>
           <TabsTrigger value="competitors" className="flex items-center gap-2">
             <UsersIcon className="h-4 w-4" />
-            Competidores
+            {isAdmin ? "Competidores" : "Participantes"}
           </TabsTrigger>
-          <TabsTrigger value="categories" className="flex items-center gap-2">
-            <LayoutGridIcon className="h-4 w-4" />
-            Categorías
-          </TabsTrigger>
+          {isAdmin && (
+            <TabsTrigger value="categories" className="flex items-center gap-2">
+              <LayoutGridIcon className="h-4 w-4" />
+              Categorías
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="timing" className="space-y-4">
@@ -64,9 +71,11 @@ export function RaceTabs({
           />
         </TabsContent>
 
-        <TabsContent value="categories" className="space-y-4">
-          <CategoryManager initialCategories={categories} raceId={race.id} activeRace={race} />
-        </TabsContent>
+        {isAdmin && (
+          <TabsContent value="categories" className="space-y-4">
+            <CategoryManager initialCategories={categories} raceId={race.id} activeRace={race} />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );
