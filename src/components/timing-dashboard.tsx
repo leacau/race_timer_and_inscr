@@ -100,19 +100,25 @@ const wrapText = (line: string, maxChars = 100) => {
 };
 
 const encodePdfText = (text: string) => {
-  return text
-    .split("")
-    .map((char) => {
-      const code = char.charCodeAt(0);
-      if (char === "\\" || char === "(" || char === ")") {
-        return `\\${char}`;
-      }
-      if (code < 32 || code > 126) {
-        return `\\${code.toString(8).padStart(3, "0")}`;
-      }
-      return char;
-    })
-    .join("");
+  const needsUnicode = /[^\x20-\x7E]/.test(text);
+  if (!needsUnicode) {
+    const safeText = text
+      .split("")
+      .map((char) => {
+        if (char === "\\" || char === "(" || char === ")") {
+          return `\\${char}`;
+        }
+        return char;
+      })
+      .join("");
+    return `(${safeText})`;
+  }
+
+  const hex = [
+    "FEFF",
+    ...Array.from(text).map((char) => char.charCodeAt(0).toString(16).padStart(4, "0")),
+  ].join("");
+  return `<${hex}>`;
 };
 
 type PdfSection = {
@@ -144,7 +150,7 @@ const buildTablesPdf = (title: string, sections: PdfSection[]) => {
       pageContents.push(currentContent);
     }
     currentY = pageHeight - margin;
-    currentContent = `BT /F2 16 Tf ${margin} ${currentY} Td (${encodePdfText(title)}) Tj ET\n`;
+    currentContent = `BT /F2 16 Tf ${margin} ${currentY} Td ${encodePdfText(title)} Tj ET\n`;
     currentY -= lineGap * 2;
   };
 
@@ -187,9 +193,9 @@ const buildTablesPdf = (title: string, sections: PdfSection[]) => {
       const textColor = options.textColor ?? [0, 0, 0];
       lines.forEach((line) => {
         textY -= textLineHeight;
-        currentContent += `BT ${options.font} ${options.fontSize} Tf ${textColor.join(" ")} rg ${xCursor + columnPadding} ${textY} Td (${encodePdfText(
+        currentContent += `BT ${options.font} ${options.fontSize} Tf ${textColor.join(" ")} rg ${xCursor + columnPadding} ${textY} Td ${encodePdfText(
           line
-        )}) Tj ET\n`;
+        )} Tj ET\n`;
       });
       xCursor += columnWidths[index];
     });
@@ -217,7 +223,7 @@ const buildTablesPdf = (title: string, sections: PdfSection[]) => {
 
     ensureSpace(estimatedHeight);
 
-    currentContent += `BT /F2 14 Tf ${margin} ${currentY} Td (${encodePdfText(section.title)}) Tj ET\n`;
+    currentContent += `BT /F2 14 Tf ${margin} ${currentY} Td ${encodePdfText(section.title)} Tj ET\n`;
     currentY -= lineGap;
 
     drawRow(section.headers.map(String), columnWidths, {
