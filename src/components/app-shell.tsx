@@ -14,16 +14,7 @@ import {
   useSidebar,
   SidebarProvider,
 } from "@/components/ui/sidebar";
-import {
-  Users,
-  Timer,
-  Settings,
-  Shield,
-  Eye,
-  LogOut,
-  LayoutGrid,
-  CalendarIcon,
-} from "lucide-react";
+import { Settings, LogOut, LayoutGrid, CalendarIcon } from "lucide-react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { RaceTimerProLogo } from "./icons";
@@ -55,9 +46,7 @@ import {
 } from "./ui/select";
 
 const navItems = [
-  { href: "/", icon: Timer, label: "Cronometraje" },
-  { href: "/competitors", icon: Users, label: "Competidores" },
-  { href: "/categories", icon: LayoutGrid, label: "Categorías" },
+  { href: "/", icon: LayoutGrid, label: "Dashboard" },
   { href: "/races", icon: CalendarIcon, label: "Carreras" },
 ];
 
@@ -66,13 +55,13 @@ function AppHeader() {
   const { isMobile } = useSidebar();
 
   const pageTitles: { [key: string]: string } = {
-    "/": "Cronometraje",
-    "/competitors": "Gestión de Competidores",
-    "/categories": "Administrar Categorías",
+    "/": "Dashboard",
     "/races": "Carreras",
   };
   const pathname = usePathname();
-  const title = pageTitles[pathname] ?? "Panel";
+  const title = pathname.startsWith("/races/")
+    ? "Detalle de carrera"
+    : pageTitles[pathname] ?? "Panel";
 
   return (
     <header className="flex h-16 items-center justify-between gap-4 border-b bg-card px-4 md:px-6">
