@@ -195,7 +195,11 @@ export async function addRunnerChange(change: Omit<RunnerChange, "id" | "created
 
 export async function getRunnerChanges(raceId: string): Promise<RunnerChange[]> {
     const changesCol = collection(db, "runnerChanges");
-    const q = query(changesCol, where("raceId", "==", raceId), orderBy("createdAt", "desc"));
+    const q = query(changesCol, where("raceId", "==", raceId));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<RunnerChange, "id">) }));
+    const changes = snapshot.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<RunnerChange, "id">) }));
+
+    changes.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+
+    return changes;
 }
