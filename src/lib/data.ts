@@ -18,10 +18,9 @@ import type { Participant, Category, CategoryInput, ParticipantFirestoreData, Ra
 
 export async function getParticipants(raceId?: string | null): Promise<Participant[]> {
     const participantsCol = collection(db, "participants");
-    const constraints = [orderBy("bibNumber")];
-    if (raceId) {
-        constraints.unshift(where("raceId", "==", raceId));
-    }
+    const constraints = raceId
+        ? [where("raceId", "==", raceId)]
+        : [orderBy("bibNumber")];
     const q = query(participantsCol, ...constraints);
     const participantSnapshot = await getDocs(q);
     const participantList = participantSnapshot.docs.map(doc => {
@@ -32,18 +31,27 @@ export async function getParticipants(raceId?: string | null): Promise<Participa
             isSpecial: data.isSpecial ?? false,
         } satisfies Participant;
     });
+
+    if (raceId) {
+        participantList.sort((a, b) => a.bibNumber - b.bibNumber);
+    }
+
     return participantList;
 }
 
 export async function getCategories(raceId?: string | null): Promise<Category[]> {
     const categoriesCol = collection(db, "categories");
-    const constraints = [orderBy("name")];
-    if (raceId) {
-        constraints.unshift(where("raceId", "==", raceId));
-    }
+    const constraints = raceId
+        ? [where("raceId", "==", raceId)]
+        : [orderBy("name")];
     const q = query(categoriesCol, ...constraints);
     const categorySnapshot = await getDocs(q);
     const categoryList = categorySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Category));
+
+    if (raceId) {
+        categoryList.sort((a, b) => a.name.localeCompare(b.name));
+    }
+
     return categoryList;
 }
 
