@@ -535,7 +535,8 @@ export function TimingDashboard({
       });
     } catch (error) {
       console.error(error);
-      toast({ variant: "destructive", title: "Error", description: "No se pudo iniciar el cronómetro seleccionado." });
+      const message = error instanceof Error ? error.message : "No se pudo iniciar el cronómetro seleccionado.";
+      toast({ variant: "destructive", title: "Error", description: message });
     } finally {
       setStartingGroupKey(null);
     }

@@ -276,6 +276,9 @@ export function CompetitorsManager({
       setEditingParticipant(participant);
       form.reset({
         ...participant,
+        city: participant.city ?? "",
+        province: participant.province ?? "",
+        country: participant.country ?? "",
         birthDate: participant.birthDate ? new Date(participant.birthDate).toISOString().split("T")[0] : "",
         isSpecial: participant.isSpecial,
       });

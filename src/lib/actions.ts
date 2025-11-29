@@ -66,11 +66,16 @@ export async function updateParticipant(
 ) {
   const categories = await db.getCategories(raceId);
   const categoryId = assignCategory(participantData, categories, raceDate, ageCalculationMethod);
+  const chipNumber = generateChipNumber(participantData.bibNumber);
 
   const dataToUpdate: Partial<ParticipantFirestoreData> = {
     ...participantData,
     isSpecial: Boolean(participantData.isSpecial),
     categoryId,
+    chipNumber,
+    city: participantData.city || null,
+    province: participantData.province || null,
+    country: participantData.country || null,
   };
 
   await db.updateParticipant(id, dataToUpdate);
@@ -116,6 +121,11 @@ export async function startTimingGroup(raceId: string, mode: TimingMode, groupId
 
   if (targets.length === 0) {
     return { updated: 0 };
+  }
+
+  const missingFields = targets.filter((participant) => !participant.bibNumber || !participant.chipNumber);
+  if (missingFields.length > 0) {
+    throw new Error("No puedes iniciar la carrera: faltan dorsales o chips en algunos participantes.");
   }
 
   const startTime = Date.now();
