@@ -3,7 +3,7 @@
 import { format, parseISO } from "date-fns";
 import { es } from "date-fns/locale";
 import { CalendarIcon, UsersIcon, TimerIcon, LayoutGridIcon } from "lucide-react";
-import type { Category, Participant, Race } from "@/lib/types";
+import type { Category, Participant, Race, RunnerChange } from "@/lib/types";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TimingDashboard } from "./timing-dashboard";
 import { CompetitorsManager } from "./competitors-manager";
@@ -19,6 +19,7 @@ export function RaceTabs({
   race: Race;
   participants: Participant[];
   categories: Category[];
+  runnerChanges?: RunnerChange[];
 }) {
   const { role } = useContext(AppContext);
   const isAdmin = role === "admin";
@@ -68,6 +69,7 @@ export function RaceTabs({
             categories={categories}
             raceId={race.id}
             activeRace={race}
+            runnerChanges={runnerChanges}
           />
         </TabsContent>
 

@@ -41,12 +41,16 @@ function RaceColumn({
   empty,
   races,
   badgeVariant,
+  linkPrefix,
+  openLabel,
 }: {
   title: string;
   description: string;
   empty: string;
   races: Race[];
   badgeVariant: "default" | "secondary" | "outline";
+  linkPrefix: string;
+  openLabel: string;
 }) {
   return (
     <Card className="h-full">
@@ -77,7 +81,7 @@ function RaceColumn({
                   </p>
                 </div>
                 <Button asChild size="sm">
-                  <Link href={`/races/${race.id}`}>Abrir</Link>
+                  <Link href={`${linkPrefix}/${race.id}`}>{openLabel}</Link>
                 </Button>
               </div>
             </div>
@@ -88,20 +92,36 @@ function RaceColumn({
   );
 }
 
-export function RaceDashboard({ races }: { races: Race[] }) {
+export function RaceDashboard({
+  races,
+  linkPrefix = "/races",
+  openLabel = "Abrir",
+  title = "Dashboard",
+  description = "Organiza tus carreras por estado y accede a su gestión desde un solo lugar.",
+  ctaHref = "/races",
+  ctaLabel = "Crear o gestionar carreras",
+}: {
+  races: Race[];
+  linkPrefix?: string;
+  openLabel?: string;
+  title?: string;
+  description?: string;
+  ctaHref?: string;
+  ctaLabel?: string;
+}) {
   const { current, upcoming, past } = categorizeRaces(races);
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Dashboard</h1>
-          <p className="text-muted-foreground">Organiza tus carreras por estado y accede a su gestión desde un solo lugar.</p>
+          <h1 className="text-2xl font-bold">{title}</h1>
+          <p className="text-muted-foreground">{description}</p>
         </div>
         <Button asChild>
-          <Link href="/races">
+          <Link href={ctaHref}>
             <TimerIcon className="mr-2 h-4 w-4" />
-            Crear o gestionar carreras
+            {ctaLabel}
           </Link>
         </Button>
       </div>
@@ -139,6 +159,8 @@ export function RaceDashboard({ races }: { races: Race[] }) {
           empty="No hay carreras programadas para hoy."
           races={current}
           badgeVariant="default"
+          linkPrefix={linkPrefix}
+          openLabel={openLabel}
         />
         <RaceColumn
           title="Próximas"
@@ -146,6 +168,8 @@ export function RaceDashboard({ races }: { races: Race[] }) {
           empty="Agrega nuevas carreras para planificar tus eventos."
           races={upcoming}
           badgeVariant="secondary"
+          linkPrefix={linkPrefix}
+          openLabel={openLabel}
         />
         <RaceColumn
           title="Finalizadas"
@@ -153,6 +177,8 @@ export function RaceDashboard({ races }: { races: Race[] }) {
           empty="Aún no tienes carreras finalizadas."
           races={past}
           badgeVariant="outline"
+          linkPrefix={linkPrefix}
+          openLabel={openLabel}
         />
       </div>
     </div>

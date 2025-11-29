@@ -21,6 +21,9 @@ export type Participant = {
   province: string | null;
   country: string | null;
   isSpecial: boolean;
+  kitDelivered?: boolean;
+  replacedFromId?: string | null;
+  replacedById?: string | null;
 };
 
 // Tipo para el formulario del cliente y la creación
@@ -36,6 +39,29 @@ export type ParticipantInput = {
   province?: string;
   country?: string;
   isSpecial?: boolean;
+};
+
+export type ParticipantSnapshot = Pick<
+  Participant,
+  | "id"
+  | "bibNumber"
+  | "chipNumber"
+  | "name"
+  | "surname"
+  | "dni"
+  | "gender"
+  | "distance"
+  | "birthDate"
+  | "categoryId"
+>;
+
+export type RunnerChange = {
+  id: string;
+  raceId: string;
+  participantId: string;
+  previous: ParticipantSnapshot;
+  next: ParticipantSnapshot;
+  createdAt: string;
 };
 
 // Tipo para escribir en Firestore, sin id de documento

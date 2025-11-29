@@ -47,7 +47,7 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Hash, MoreVertical, Edit, Trash2, Plus, Upload, Sparkles } from "lucide-react";
-import type { Participant, Category, ParticipantInput, Race } from "@/lib/types";
+import type { Participant, Category, ParticipantInput, Race, RunnerChange } from "@/lib/types";
 import { calculateAge, deriveBirthDateFromAge } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { AppContext } from "@/context/app-context";
@@ -169,11 +169,13 @@ export function CompetitorsManager({
   categories,
   raceId,
   activeRace,
+  runnerChanges = [],
 }: {
   participants: Participant[];
   categories: Category[];
   raceId: string | null;
   activeRace?: Race | null;
+  runnerChanges?: RunnerChange[];
 }) {
   const { toast } = useToast();
   const { role, raceDate, ageCalculationMethod } = useContext(AppContext);
@@ -211,6 +213,7 @@ export function CompetitorsManager({
   const [dniQuery, setDniQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Participant[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
+  const [participantTab, setParticipantTab] = useState<"list" | "changes">("list");
 
   const categoryMap = useMemo(() => {
     return categories.reduce((acc, category) => {
@@ -977,83 +980,153 @@ export function CompetitorsManager({
 
   return (
     <div className="flex flex-col h-full">
-      <p className="mb-2 text-sm text-muted-foreground">
-        Gestionando competidores de <span className="font-semibold text-foreground">{raceName}</span>
-      </p>
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        {isAdmin && (
-          <>
-            <Button onClick={() => handleOpenDialog()}>
-              <Plus className="mr-2 h-4 w-4" /> Añadir Participante
-            </Button>
-            <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
-              <Upload className="mr-2 h-4 w-4" /> Importar
-            </Button>
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileChange}
-              className="hidden"
-              accept=".xlsx, .xls, .csv"
-            />
-            <Button
-              variant="outline"
-              onClick={handleOpenBibDialog}
-              disabled={participants.length === 0}
-            >
-              <Hash className="mr-2 h-4 w-4" /> Asignar dorsales
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => setIsAssignmentDialogOpen(true)}
-              disabled={participants.length === 0}
-            >
-              <Sparkles className="mr-2 h-4 w-4" /> Asignar categorías
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={selectedParticipants.size === 0 || isBulkDeleting}
-              onClick={handleBulkDelete}
-            >
-              <Trash2 className="mr-2 h-4 w-4" /> Eliminar seleccionados ({selectedParticipants.size})
-            </Button>
-          </>
-        )}
-      </div>
+      <Tabs
+        value={participantTab}
+        onValueChange={(value) => setParticipantTab(value as "list" | "changes")}
+        className="flex flex-col gap-4"
+      >
+        <TabsList className="w-full sm:w-auto">
+          <TabsTrigger value="list">Participantes</TabsTrigger>
+          <TabsTrigger value="changes">Cambios de corredor</TabsTrigger>
+        </TabsList>
 
-      {!isMobile ? (
-        <div className="overflow-x-auto rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                {isAdmin && (
-                  <TableHead className="w-12">
-                    <Checkbox
-                      checked={selectedParticipants.size === participants.length && participants.length > 0}
-                      onCheckedChange={(checked) => toggleSelectAll(Boolean(checked))}
-                      aria-label="Seleccionar todos"
-                    />
-                  </TableHead>
-                )}
-                <TableHead>Dorsal</TableHead>
-                <TableHead>Nombre</TableHead>
-                <TableHead className="hidden md:table-cell">Edad</TableHead>
-                <TableHead className="hidden md:table-cell">Género</TableHead>
-                <TableHead>Distancia</TableHead>
-                <TableHead className="hidden md:table-cell">Categoría</TableHead>
-                <TableHead className="hidden sm:table-cell">Especial</TableHead>
-                <TableHead className="hidden xl:table-cell">Ubicación</TableHead>
-                {isAdmin && <TableHead className="text-right">Acciones</TableHead>}
-              </TableRow>
-            </TableHeader>
-            <TableBody>{participants.map((p) => renderParticipantRow(p))}</TableBody>
-          </Table>
-        </div>
-      ) : (
-        <div className="grid gap-4">
-          {participants.map((p) => renderParticipantCard(p))}
-        </div>
-      )}
+        <TabsContent value="list" className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Gestionando competidores de <span className="font-semibold text-foreground">{raceName}</span>
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            {isAdmin && (
+              <>
+                <Button onClick={() => handleOpenDialog()}>
+                  <Plus className="mr-2 h-4 w-4" /> Añadir Participante
+                </Button>
+                <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
+                  <Upload className="mr-2 h-4 w-4" /> Importar
+                </Button>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileChange}
+                  className="hidden"
+                  accept=".xlsx, .xls, .csv"
+                />
+                <Button
+                  variant="outline"
+                  onClick={handleOpenBibDialog}
+                  disabled={participants.length === 0}
+                >
+                  <Hash className="mr-2 h-4 w-4" /> Asignar dorsales
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => setIsAssignmentDialogOpen(true)}
+                  disabled={participants.length === 0}
+                >
+                  <Sparkles className="mr-2 h-4 w-4" /> Asignar categorías
+                </Button>
+                <Button
+                  variant="destructive"
+                  disabled={selectedParticipants.size === 0 || isBulkDeleting}
+                  onClick={handleBulkDelete}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" /> Eliminar seleccionados ({selectedParticipants.size})
+                </Button>
+              </>
+            )}
+          </div>
+
+          {!isMobile ? (
+            <div className="overflow-x-auto rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    {isAdmin && (
+                      <TableHead className="w-12">
+                        <Checkbox
+                          checked={selectedParticipants.size === participants.length && participants.length > 0}
+                          onCheckedChange={(checked) => toggleSelectAll(Boolean(checked))}
+                          aria-label="Seleccionar todos"
+                        />
+                      </TableHead>
+                    )}
+                    <TableHead>Dorsal</TableHead>
+                    <TableHead>Nombre</TableHead>
+                    <TableHead className="hidden md:table-cell">Edad</TableHead>
+                    <TableHead className="hidden md:table-cell">Género</TableHead>
+                    <TableHead>Distancia</TableHead>
+                    <TableHead className="hidden md:table-cell">Categoría</TableHead>
+                    <TableHead className="hidden sm:table-cell">Especial</TableHead>
+                    <TableHead className="hidden xl:table-cell">Ubicación</TableHead>
+                    {isAdmin && <TableHead className="text-right">Acciones</TableHead>}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>{participants.map((p) => renderParticipantRow(p))}</TableBody>
+              </Table>
+            </div>
+          ) : (
+            <div className="grid gap-4">
+              {participants.map((p) => renderParticipantCard(p))}
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="changes" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Historial de cambios de corredor</CardTitle>
+              <CardDescription>Registros de reemplazos guardados desde entrega de kits.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {runnerChanges.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Aún no hay cambios registrados.</p>
+              ) : (
+                <div className="overflow-x-auto rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Fecha</TableHead>
+                        <TableHead>Dorsal</TableHead>
+                        <TableHead>Anterior</TableHead>
+                        <TableHead>Nuevo</TableHead>
+                        <TableHead>Categoría</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {runnerChanges.map((change) => (
+                        <TableRow key={change.id}>
+                          <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
+                            {new Date(change.createdAt).toLocaleString()}
+                          </TableCell>
+                          <TableCell className="font-semibold">{change.previous.bibNumber}</TableCell>
+                          <TableCell>
+                            <div className="flex flex-col">
+                              <span className="font-medium">{`${change.previous.name} ${change.previous.surname}`}</span>
+                              <span className="text-xs text-muted-foreground">DNI: {change.previous.dni}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-col">
+                              <span className="font-medium">{`${change.next.name} ${change.next.surname}`}</span>
+                              <span className="text-xs text-muted-foreground">DNI: {change.next.dni}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            {change.next.categoryId ? (
+                              <Badge variant="secondary">{categoryMap[change.next.categoryId] || "Sin categoría"}</Badge>
+                            ) : (
+                              <Badge variant="outline">Sin categoría</Badge>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>

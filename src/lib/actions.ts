@@ -13,6 +13,7 @@ import type {
   Participant,
   ParticipantFirestoreData,
   ParticipantInput,
+  ParticipantSnapshot,
   RaceInput,
 } from "./types";
 
@@ -61,6 +62,9 @@ export async function addParticipant(
     chipNumber,
     startTime: null,
     finishTime: null,
+    kitDelivered: false,
+    replacedFromId: null,
+    replacedById: null,
   };
   
   await db.addParticipant(participantToSave);
@@ -98,6 +102,78 @@ export async function deleteParticipant(id: string) {
   await db.deleteParticipant(id);
   revalidatePath("/");
   revalidatePath("/competitors");
+}
+
+export async function toggleKitDelivered(participantId: string, delivered: boolean, raceId?: string) {
+  await db.updateParticipant(participantId, { kitDelivered: delivered });
+  revalidatePath("/");
+  if (raceId) {
+    revalidatePath(`/races/${raceId}`);
+    revalidatePath(`/kits/${raceId}`);
+  }
+}
+
+export async function replaceParticipant(
+  participantId: string,
+  replacement: ParticipantInput,
+  raceDate: Date,
+  ageCalculationMethod: AgeCalculationMethod,
+  raceId: string
+) {
+  const original = await db.getParticipant(participantId);
+  if (!original) {
+    throw new Error("Participante no encontrado para reemplazar.");
+  }
+
+  const categories = await db.getCategories(raceId);
+  const categoryId = assignCategory(replacement, categories, raceDate, ageCalculationMethod);
+
+  const nextSnapshot: ParticipantSnapshot = {
+    id: original.id,
+    bibNumber: original.bibNumber,
+    chipNumber: original.chipNumber,
+    name: replacement.name,
+    surname: replacement.surname,
+    dni: replacement.dni,
+    gender: replacement.gender,
+    distance: replacement.distance,
+    birthDate: replacement.birthDate,
+    categoryId,
+  };
+
+  const previousSnapshot: ParticipantSnapshot = {
+    id: original.id,
+    bibNumber: original.bibNumber,
+    chipNumber: original.chipNumber,
+    name: original.name,
+    surname: original.surname,
+    dni: original.dni,
+    gender: original.gender,
+    distance: original.distance,
+    birthDate: original.birthDate,
+    categoryId: original.categoryId,
+  };
+
+  const dataToUpdate: Partial<ParticipantFirestoreData> = {
+    ...replacement,
+    categoryId,
+    chipNumber: original.chipNumber,
+    bibNumber: original.bibNumber,
+    isSpecial: Boolean(replacement.isSpecial),
+    city: replacement.city || null,
+    province: replacement.province || null,
+    country: replacement.country || null,
+    kitDelivered: original.kitDelivered ?? false,
+    replacedFromId: original.replacedFromId ?? null,
+    replacedById: original.replacedById ?? null,
+  };
+
+  await db.updateParticipant(participantId, dataToUpdate);
+  await db.addRunnerChange({ raceId, participantId, previous: previousSnapshot, next: nextSnapshot });
+
+  revalidatePath("/");
+  revalidatePath(`/races/${raceId}`);
+  revalidatePath(`/kits/${raceId}`);
 }
 
 export async function bulkDeleteParticipants(ids: string[]) {
@@ -208,6 +284,9 @@ export async function importParticipants(
         province: p.province || null,
         country: p.country || null,
         isSpecial: Boolean(p.isSpecial),
+        kitDelivered: false,
+        replacedFromId: null,
+        replacedById: null,
     };
     return data;
   });

@@ -13,8 +13,17 @@ import {
     orderBy,
     writeBatch,
     where,
+    getDoc,
 } from "firebase/firestore";
-import type { Participant, Category, CategoryInput, ParticipantFirestoreData, Race, RaceInput } from "./types";
+import type {
+  Participant,
+  Category,
+  CategoryInput,
+  ParticipantFirestoreData,
+  Race,
+  RaceInput,
+  RunnerChange,
+} from "./types";
 
 export async function getParticipants(raceId?: string | null): Promise<Participant[]> {
     const participantsCol = collection(db, "participants");
@@ -29,6 +38,9 @@ export async function getParticipants(raceId?: string | null): Promise<Participa
             id: doc.id,
             ...data,
             isSpecial: data.isSpecial ?? false,
+            kitDelivered: data.kitDelivered ?? false,
+            replacedFromId: data.replacedFromId ?? null,
+            replacedById: data.replacedById ?? null,
         } satisfies Participant;
     });
 
@@ -63,6 +75,21 @@ export async function addParticipant(participantData: ParticipantFirestoreData):
 export async function updateParticipant(id: string, data: Partial<ParticipantFirestoreData>): Promise<void> {
     const participantRef = doc(db, "participants", id);
     await updateDoc(participantRef, data);
+}
+
+export async function getParticipant(id: string): Promise<Participant | null> {
+    const participantRef = doc(db, "participants", id);
+    const snapshot = await getDoc(participantRef);
+    if (!snapshot.exists()) return null;
+    const data = snapshot.data() as ParticipantFirestoreData;
+    return {
+        id: snapshot.id,
+        ...data,
+        isSpecial: data.isSpecial ?? false,
+        kitDelivered: data.kitDelivered ?? false,
+        replacedFromId: data.replacedFromId ?? null,
+        replacedById: data.replacedById ?? null,
+    } satisfies Participant;
 }
 
 export async function deleteParticipant(id: string): Promise<void> {
@@ -156,4 +183,19 @@ export async function updateRace(id: string, data: RaceInput): Promise<void> {
 export async function deleteRace(id: string): Promise<void> {
     const raceRef = doc(db, "races", id);
     await deleteDoc(raceRef);
+}
+
+export async function addRunnerChange(change: Omit<RunnerChange, "id" | "createdAt"> & { createdAt?: string }) {
+    const docRef = await addDoc(collection(db, "runnerChanges"), {
+        ...change,
+        createdAt: change.createdAt ?? new Date().toISOString(),
+    });
+    return docRef.id;
+}
+
+export async function getRunnerChanges(raceId: string): Promise<RunnerChange[]> {
+    const changesCol = collection(db, "runnerChanges");
+    const q = query(changesCol, where("raceId", "==", raceId), orderBy("createdAt", "desc"));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<RunnerChange, "id">) }));
 }
