@@ -58,13 +58,22 @@ type KitDeliveryProps = {
 };
 
 export function KitDelivery({ race, participants, categories }: KitDeliveryProps) {
-  const { raceDate, ageCalculationMethod } = useContext(AppContext);
+  const { raceDate, ageCalculationMethod, setRaceDate, setAgeCalculationMethod } = useContext(AppContext);
   const { toast } = useToast();
   const [query, setQuery] = useState("");
   const [filtered, setFiltered] = useState<Participant[]>(participants);
   const [selected, setSelected] = useState<Participant | null>(null);
   const [isReplacementOpen, setIsReplacementOpen] = useState(false);
   const [localParticipants, setLocalParticipants] = useState<Participant[]>(participants);
+
+  useEffect(() => {
+    if (race.eventDate) {
+      setRaceDate(new Date(race.eventDate));
+    }
+    if (race.ageCalculationMethod) {
+      setAgeCalculationMethod(race.ageCalculationMethod);
+    }
+  }, [race, setAgeCalculationMethod, setRaceDate]);
 
   useEffect(() => {
     setLocalParticipants(participants);

@@ -65,6 +65,7 @@ export async function addParticipant(
     kitDelivered: false,
     replacedFromId: null,
     replacedById: null,
+    teamId: participantData.teamId || null,
   };
   
   await db.addParticipant(participantToSave);
@@ -91,6 +92,7 @@ export async function updateParticipant(
     city: participantData.city || null,
     province: participantData.province || null,
     country: participantData.country || null,
+    teamId: participantData.teamId || null,
   };
 
   await db.updateParticipant(id, dataToUpdate);
@@ -151,6 +153,7 @@ export async function replaceParticipant(
     city: replacement.city || null,
     province: replacement.province || null,
     country: replacement.country || null,
+    teamId: replacement.teamId || original.teamId || null,
     kitDelivered: original.kitDelivered ?? false,
     replacedFromId: original.id,
     replacedById: null,
@@ -293,6 +296,7 @@ export async function importParticipants(
         province: p.province || null,
         country: p.country || null,
         isSpecial: Boolean(p.isSpecial),
+        teamId: null,
         kitDelivered: false,
         replacedFromId: null,
         replacedById: null,
@@ -309,6 +313,27 @@ export async function importParticipants(
   revalidatePath("/");
   revalidatePath("/competitors");
   return { count: participantsToCreate.length };
+}
+
+export async function addTeamToRace(raceId: string, name: string) {
+  await db.addTeam({ raceId, name });
+  revalidatePath(`/races/${raceId}`);
+  revalidatePath(`/kits/${raceId}`);
+  revalidatePath("/competitors");
+}
+
+export async function renameTeam(raceId: string, teamId: string, name: string) {
+  await db.updateTeam(teamId, { name });
+  revalidatePath(`/races/${raceId}`);
+  revalidatePath(`/kits/${raceId}`);
+  revalidatePath("/competitors");
+}
+
+export async function removeTeam(raceId: string, teamId: string) {
+  await db.deleteTeam(teamId);
+  revalidatePath(`/races/${raceId}`);
+  revalidatePath(`/kits/${raceId}`);
+  revalidatePath("/competitors");
 }
 
 const toComparableBib = (value: string): string | number => {
@@ -701,7 +726,29 @@ export async function addRace(data: RaceInput) {
 }
 
 export async function updateRace(id: string, data: RaceInput) {
+  const previous = await db.getRace(id);
   await db.updateRace(id, data);
+
+  if (previous && (previous.ageCalculationMethod !== data.ageCalculationMethod || previous.eventDate !== data.eventDate)) {
+    const [participants, categories] = await Promise.all([db.getParticipants(id), db.getCategories(id)]);
+    const raceDate = data.eventDate ? new Date(data.eventDate) : new Date();
+
+    const updates = participants.map((participant) => ({
+      id: participant.id,
+      data: {
+        categoryId: assignCategory(
+          { distance: participant.distance, gender: participant.gender, birthDate: participant.birthDate },
+          categories,
+          raceDate,
+          data.ageCalculationMethod
+        ),
+      },
+    }));
+
+    if (updates.length > 0) {
+      await db.bulkUpdateParticipants(updates);
+    }
+  }
   revalidatePath("/");
   revalidatePath("/competitors");
   revalidatePath("/categories");

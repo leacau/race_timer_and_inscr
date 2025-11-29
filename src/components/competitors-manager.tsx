@@ -47,7 +47,7 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Hash, MoreVertical, Edit, Trash2, Plus, Upload, Sparkles } from "lucide-react";
-import type { Participant, Category, ParticipantInput, Race, RunnerChange } from "@/lib/types";
+import type { Participant, Category, ParticipantInput, Race, RunnerChange, Team } from "@/lib/types";
 import { calculateAge, deriveBirthDateFromAge } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { AppContext } from "@/context/app-context";
@@ -62,6 +62,8 @@ import {
   bulkDeleteParticipants,
   assignCategoriesToParticipants,
   assignBibNumbers,
+  addTeamToRace,
+  removeTeam,
 } from "@/lib/actions";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -81,6 +83,7 @@ const participantSchema = z.object({
   province: z.string().optional(),
   country: z.string().optional(),
   isSpecial: z.boolean().default(false),
+  teamId: z.string().optional().nullable(),
 });
 
 type ParticipantFormValues = z.infer<typeof participantSchema>;
@@ -170,12 +173,14 @@ export function CompetitorsManager({
   raceId,
   activeRace,
   runnerChanges = [],
+  teams = [],
 }: {
   participants: Participant[];
   categories: Category[];
   raceId: string | null;
   activeRace?: Race | null;
   runnerChanges?: RunnerChange[];
+  teams?: Team[];
 }) {
   const { toast } = useToast();
   const { role, raceDate, ageCalculationMethod } = useContext(AppContext);
@@ -215,6 +220,7 @@ export function CompetitorsManager({
   const [searchResults, setSearchResults] = useState<Participant[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [participantTab, setParticipantTab] = useState<"list" | "changes">("list");
+  const [newTeamName, setNewTeamName] = useState("");
 
   const categoryMap = useMemo(() => {
     return categories.reduce((acc, category) => {
@@ -222,6 +228,13 @@ export function CompetitorsManager({
       return acc;
     }, {} as Record<string, string>);
   }, [categories]);
+
+  const teamMap = useMemo(() => {
+    return teams.reduce((acc, team) => {
+      acc[team.id] = team.name;
+      return acc;
+    }, {} as Record<string, string>);
+  }, [teams]);
 
   if (!raceId) {
     return (
@@ -266,6 +279,16 @@ export function CompetitorsManager({
     () => filteredParticipants.filter((participant) => !participant.replacedById),
     [filteredParticipants]
   );
+
+  const teamCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    selectableParticipants.forEach((participant) => {
+      if (participant.teamId) {
+        counts[participant.teamId] = (counts[participant.teamId] || 0) + 1;
+      }
+    });
+    return counts;
+  }, [selectableParticipants]);
 
   const handleViewerSearch = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -319,6 +342,7 @@ export function CompetitorsManager({
       province: "",
       country: "",
       isSpecial: false,
+      teamId: "",
     },
   });
 
@@ -332,6 +356,7 @@ export function CompetitorsManager({
         country: participant.country ?? "",
         birthDate: participant.birthDate ? new Date(participant.birthDate).toISOString().split("T")[0] : "",
         isSpecial: participant.isSpecial,
+        teamId: participant.teamId ?? "",
       });
     } else {
       setEditingParticipant(null);
@@ -347,9 +372,39 @@ export function CompetitorsManager({
         province: "",
         country: "",
         isSpecial: false,
+        teamId: "",
       });
     }
     setOpen(true);
+  };
+
+  const handleAddTeam = async () => {
+    if (!raceId) return;
+    const normalized = newTeamName.trim();
+    if (!normalized) {
+      toast({ variant: "destructive", title: "Nombre requerido", description: "Ingresa un nombre para el equipo." });
+      return;
+    }
+    try {
+      await addTeamToRace(raceId, normalized);
+      setNewTeamName("");
+      toast({ title: "Equipo creado", description: "Ahora puedes asignar participantes al equipo." });
+    } catch (error) {
+      console.error(error);
+      toast({ variant: "destructive", title: "Error", description: "No se pudo crear el equipo." });
+    }
+  };
+
+  const handleDeleteTeam = async (teamId: string) => {
+    if (!raceId) return;
+    if (!window.confirm("¿Eliminar este equipo?")) return;
+    try {
+      await removeTeam(raceId, teamId);
+      toast({ title: "Equipo eliminado", description: "Se quitaron los datos del equipo." });
+    } catch (error) {
+      console.error(error);
+      toast({ variant: "destructive", title: "Error", description: "No se pudo eliminar el equipo." });
+    }
   };
 
   const onSubmit = async (values: ParticipantFormValues) => {
@@ -370,6 +425,7 @@ export function CompetitorsManager({
         province: values.province,
         country: values.country,
         isSpecial: values.isSpecial,
+        teamId: activeRace?.competitionMode === "teams" ? values.teamId || null : null,
       };
 
       if (editingParticipant) {
@@ -846,6 +902,9 @@ export function CompetitorsManager({
         <TableCell className="hidden md:table-cell">{age ?? "-"}</TableCell>
         <TableCell className="hidden md:table-cell">{p.gender === "Male" ? "Masculino" : p.gender === "Female" ? "Femenino" : "Otro"}</TableCell>
         <TableCell>{p.distance}</TableCell>
+        {activeRace?.competitionMode === "teams" && (
+          <TableCell className="hidden lg:table-cell">{p.teamId ? teamMap[p.teamId] || "Sin equipo" : "Sin equipo"}</TableCell>
+        )}
         <TableCell className="hidden md:table-cell">
           {p.categoryId ? <Badge variant="secondary">{categoryMap[p.categoryId] || "N/A"}</Badge> : <Badge variant="outline">Sin categoría</Badge>}
         </TableCell>
@@ -933,6 +992,9 @@ export function CompetitorsManager({
             </p>
             <div className="mt-1 flex flex-wrap gap-2">
               {p.categoryId && <Badge variant="secondary">{categoryMap[p.categoryId] || "N/A"}</Badge>}
+              {activeRace?.competitionMode === "teams" && (
+                <Badge variant="outline">{p.teamId ? teamMap[p.teamId] || "Sin equipo" : "Sin equipo"}</Badge>
+              )}
               {p.isSpecial && (
                 <Badge variant="default" className="gap-1 text-xs">
                   <Sparkles className="h-3 w-3" /> Especial
@@ -1001,6 +1063,7 @@ export function CompetitorsManager({
                         <TableHead>Género</TableHead>
                         <TableHead>Categoría</TableHead>
                         <TableHead>Distancia</TableHead>
+                        {activeRace?.competitionMode === "teams" && <TableHead>Equipo</TableHead>}
                         <TableHead>Especial</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -1018,6 +1081,9 @@ export function CompetitorsManager({
                             )}
                           </TableCell>
                           <TableCell>{p.distance}</TableCell>
+                          {activeRace?.competitionMode === "teams" && (
+                            <TableCell>{p.teamId ? teamMap[p.teamId] || "Sin equipo" : "Sin equipo"}</TableCell>
+                          )}
                           <TableCell>
                             {p.isSpecial ? (
                               <Badge variant="secondary">Especial</Badge>
@@ -1064,6 +1130,48 @@ export function CompetitorsManager({
             />
             <p className="text-xs text-muted-foreground">Autobúsqueda desde el tercer caracter.</p>
           </div>
+          {activeRace?.competitionMode === "teams" && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Equipos</CardTitle>
+                <CardDescription>Define equipos y asigna competidores.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <Input
+                    placeholder="Nombre del equipo"
+                    value={newTeamName}
+                    onChange={(event) => setNewTeamName(event.target.value)}
+                  />
+                  <Button onClick={handleAddTeam} className="sm:w-auto">
+                    <Plus className="mr-2 h-4 w-4" /> Crear equipo
+                  </Button>
+                </div>
+                {teams.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Aún no hay equipos cargados.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {teams.map((team) => (
+                      <div key={team.id} className="flex items-center gap-2 rounded border px-3 py-2 text-sm">
+                        <span className="font-medium">{team.name}</span>
+                        <span className="text-muted-foreground">{teamCounts[team.id] || 0} integrantes</span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => handleDeleteTeam(team.id)}
+                          disabled={(teamCounts[team.id] || 0) > 0}
+                          title={teamCounts[team.id] > 0 ? "No puedes eliminar un equipo con integrantes" : "Eliminar equipo"}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             {isAdmin && (
               <>
@@ -1125,6 +1233,7 @@ export function CompetitorsManager({
                     <TableHead className="hidden md:table-cell">Edad</TableHead>
                     <TableHead className="hidden md:table-cell">Género</TableHead>
                     <TableHead>Distancia</TableHead>
+                    {activeRace?.competitionMode === "teams" && <TableHead className="hidden lg:table-cell">Equipo</TableHead>}
                     <TableHead className="hidden md:table-cell">Categoría</TableHead>
                     <TableHead className="hidden sm:table-cell">Especial</TableHead>
                     <TableHead className="hidden xl:table-cell">Ubicación</TableHead>
@@ -1325,6 +1434,33 @@ export function CompetitorsManager({
                   )}
                 />
               </div>
+              {activeRace?.competitionMode === "teams" && (
+                <FormField
+                  control={form.control}
+                  name="teamId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Equipo</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value ?? ""}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecciona un equipo" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="">Sin equipo</SelectItem>
+                          {teams.map((team) => (
+                            <SelectItem key={team.id} value={team.id}>
+                              {team.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
               <FormField
                 control={form.control}
                 name="isSpecial"

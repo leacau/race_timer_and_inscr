@@ -2,6 +2,30 @@
 
 export type AgeCalculationMethod = 'raceDay' | 'endOfYear';
 
+export type RaceDiscipline =
+  | 'pedestrismo'
+  | 'duatlon'
+  | 'triatlon'
+  | 'trail'
+  | 'ciclismo'
+  | 'automovilismo'
+  | 'otra';
+
+export type RaceEvaluation = 'time' | 'points';
+export type RelayMeasurement = 'total' | 'perLeg';
+
+export type RaceInstance = {
+  id: string;
+  name: string;
+  includeInResult: boolean;
+};
+
+export type Team = {
+  id: string;
+  raceId: string;
+  name: string;
+};
+
 // Tipo de Participante como se lee de Firestore
 export type Participant = {
   id: string;
@@ -24,6 +48,7 @@ export type Participant = {
   kitDelivered?: boolean;
   replacedFromId?: string | null;
   replacedById?: string | null;
+  teamId?: string | null;
 };
 
 // Tipo para el formulario del cliente y la creación
@@ -39,6 +64,7 @@ export type ParticipantInput = {
   province?: string;
   country?: string;
   isSpecial?: boolean;
+  teamId?: string | null;
 };
 
 export type ParticipantSnapshot = Pick<
@@ -83,6 +109,18 @@ export type Race = {
   id: string;
   name: string;
   eventDate: string; // YYYY-MM-DD
+  ageCalculationMethod: AgeCalculationMethod;
+  discipline: RaceDiscipline;
+  competitionMode: 'individual' | 'teams';
+  timingAggregation: 'single' | 'multiple';
+  evaluationMethod: RaceEvaluation;
+  scoringCriteria?: string;
+  autoScoringRules?: string;
+  isRelay: boolean;
+  relayMeasurement: RelayMeasurement;
+  isMultiStage: boolean;
+  includeInstancesInResult: boolean;
+  instances: RaceInstance[];
 };
 
 export type RaceInput = Omit<Race, 'id'>;

@@ -23,7 +23,25 @@ import type {
   Race,
   RaceInput,
   RunnerChange,
+  Team,
 } from "./types";
+
+const normalizeRace = (data: Omit<Race, "id">): Omit<Race, "id"> => ({
+    ageCalculationMethod: data.ageCalculationMethod ?? "raceDay",
+    competitionMode: data.competitionMode ?? "individual",
+    evaluationMethod: data.evaluationMethod ?? "time",
+    timingAggregation: data.timingAggregation ?? "single",
+    discipline: data.discipline ?? "otra",
+    scoringCriteria: data.scoringCriteria ?? "",
+    autoScoringRules: data.autoScoringRules ?? "",
+    isRelay: data.isRelay ?? false,
+    relayMeasurement: data.relayMeasurement ?? "total",
+    isMultiStage: data.isMultiStage ?? false,
+    includeInstancesInResult: data.includeInstancesInResult ?? false,
+    instances: data.instances ?? [],
+    name: data.name,
+    eventDate: data.eventDate,
+});
 
 export async function getParticipants(raceId?: string | null): Promise<Participant[]> {
     const participantsCol = collection(db, "participants");
@@ -37,12 +55,13 @@ export async function getParticipants(raceId?: string | null): Promise<Participa
         return {
             id: doc.id,
             ...data,
-            isSpecial: data.isSpecial ?? false,
-            kitDelivered: data.kitDelivered ?? false,
-            replacedFromId: data.replacedFromId ?? null,
-            replacedById: data.replacedById ?? null,
-        } satisfies Participant;
-    });
+        isSpecial: data.isSpecial ?? false,
+        kitDelivered: data.kitDelivered ?? false,
+        replacedFromId: data.replacedFromId ?? null,
+        replacedById: data.replacedById ?? null,
+        teamId: data.teamId ?? null,
+    } satisfies Participant;
+  });
 
     if (raceId) {
         participantList.sort((a, b) => a.bibNumber - b.bibNumber);
@@ -89,6 +108,7 @@ export async function getParticipant(id: string): Promise<Participant | null> {
         kitDelivered: data.kitDelivered ?? false,
         replacedFromId: data.replacedFromId ?? null,
         replacedById: data.replacedById ?? null,
+        teamId: data.teamId ?? null,
     } satisfies Participant;
 }
 
@@ -167,7 +187,7 @@ export async function getRaces(): Promise<Race[]> {
     const racesCol = collection(db, "races");
     const q = query(racesCol, orderBy("eventDate", "desc"));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<Race, "id">) }));
+    return snapshot.docs.map((doc) => ({ id: doc.id, ...normalizeRace(doc.data() as Omit<Race, "id">) }));
 }
 
 export async function addRace(data: RaceInput): Promise<string> {
@@ -183,7 +203,7 @@ export async function getRace(id: string): Promise<Race | null> {
         return null;
     }
 
-    return { id: snapshot.id, ...(snapshot.data() as Omit<Race, "id">) };
+    return { id: snapshot.id, ...normalizeRace(snapshot.data() as Omit<Race, "id">) };
 }
 
 export async function updateRace(id: string, data: RaceInput): Promise<void> {
@@ -213,4 +233,26 @@ export async function getRunnerChanges(raceId: string): Promise<RunnerChange[]> 
     changes.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
 
     return changes;
+}
+
+export async function getTeams(raceId: string): Promise<Team[]> {
+    const teamsCol = collection(db, "teams");
+    const q = query(teamsCol, where("raceId", "==", raceId));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<Team, "id">) }));
+}
+
+export async function addTeam(team: Omit<Team, "id">): Promise<string> {
+    const docRef = await addDoc(collection(db, "teams"), team);
+    return docRef.id;
+}
+
+export async function updateTeam(id: string, data: Partial<Omit<Team, "id">>): Promise<void> {
+    const teamRef = doc(db, "teams", id);
+    await updateDoc(teamRef, data);
+}
+
+export async function deleteTeam(id: string): Promise<void> {
+    const teamRef = doc(db, "teams", id);
+    await deleteDoc(teamRef);
 }
