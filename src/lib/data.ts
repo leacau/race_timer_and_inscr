@@ -175,6 +175,17 @@ export async function addRace(data: RaceInput): Promise<string> {
     return docRef.id;
 }
 
+export async function getRace(id: string): Promise<Race | null> {
+    const raceRef = doc(db, "races", id);
+    const snapshot = await getDoc(raceRef);
+
+    if (!snapshot.exists()) {
+        return null;
+    }
+
+    return { id: snapshot.id, ...(snapshot.data() as Omit<Race, "id">) };
+}
+
 export async function updateRace(id: string, data: RaceInput): Promise<void> {
     const raceRef = doc(db, "races", id);
     await updateDoc(raceRef, data);

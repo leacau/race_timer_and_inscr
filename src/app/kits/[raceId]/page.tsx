@@ -1,12 +1,11 @@
 import { notFound } from "next/navigation";
-import { getCategories, getParticipants, getRaces } from "@/lib/data";
+import { getCategories, getParticipants, getRace } from "@/lib/data";
 import { KitDelivery } from "@/components/kit-delivery";
 import { DataError } from "@/components/data-error";
 
 export default async function KitDeliveryPage({ params }: { params: { raceId: string } }) {
   try {
-    const races = await getRaces();
-    const race = races.find((item) => item.id === params.raceId);
+    const race = await getRace(params.raceId);
 
     if (!race) {
       notFound();
