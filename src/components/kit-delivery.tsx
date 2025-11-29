@@ -4,7 +4,7 @@ import { useContext, useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { SearchIcon, TruckIcon, SwapHorizontalIcon } from "lucide-react";
+import { ArrowLeftRightIcon, SearchIcon, TruckIcon } from "lucide-react";
 
 import type { Category, Participant, Race } from "@/lib/types";
 import { assignCategory } from "@/lib/logic";
@@ -293,7 +293,7 @@ export function KitDelivery({ race, participants, categories }: KitDeliveryProps
               </div>
 
               <Button variant="secondary" className="w-full" onClick={() => setIsReplacementOpen(true)}>
-                <SwapHorizontalIcon className="mr-2 h-4 w-4" /> Cambio de corredor
+                <ArrowLeftRightIcon className="mr-2 h-4 w-4" /> Cambio de corredor
               </Button>
             </div>
           )}
@@ -505,7 +505,7 @@ export function KitDelivery({ race, participants, categories }: KitDeliveryProps
                   Cancelar
                 </Button>
                 <Button type="submit">
-                  <SwapHorizontalIcon className="mr-2 h-4 w-4" /> Guardar cambio
+                  <ArrowLeftRightIcon className="mr-2 h-4 w-4" /> Guardar cambio
                 </Button>
               </DialogFooter>
             </form>
