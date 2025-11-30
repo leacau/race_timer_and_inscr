@@ -3,9 +3,9 @@ import { RaceTabs } from "@/components/race-tabs";
 import { DataError } from "@/components/data-error";
 import { getCategories, getParticipants, getRace, getRunnerChanges, getTeams } from "@/lib/data";
 
-export default async function RaceDetailPage({ params }: { params: Promise<{ raceId: string }> }) {
+export default async function RaceDetailPage({ params }: { params: { raceId: string } }) {
   try {
-    const { raceId } = await params;
+    const { raceId } = params;
     const race = await getRace(raceId);
 
     if (!race) {

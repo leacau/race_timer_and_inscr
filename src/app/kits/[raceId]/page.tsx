@@ -3,9 +3,9 @@ import { getCategories, getParticipants, getRace } from "@/lib/data";
 import { KitDelivery } from "@/components/kit-delivery";
 import { DataError } from "@/components/data-error";
 
-export default async function KitDeliveryPage({ params }: { params: Promise<{ raceId: string }> }) {
+export default async function KitDeliveryPage({ params }: { params: { raceId: string } }) {
   try {
-    const { raceId } = await params;
+    const { raceId } = params;
     const race = await getRace(raceId);
 
     if (!race) {
