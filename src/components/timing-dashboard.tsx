@@ -12,6 +12,15 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { AppContext } from "@/context/app-context";
 import { formatElapsedTime } from "@/lib/utils";
@@ -334,6 +343,7 @@ export function TimingDashboard({
   >({});
   const [duplicateArrivals, setDuplicateArrivals] = useState<ArrivalEntry[]>([]);
   const [duplicateCounters, setDuplicateCounters] = useState<Record<string, number>>({});
+  const [isFinalizing, setIsFinalizing] = useState(false);
   const raceName = activeRace?.name ?? "Carrera";
   const [viewerTab, setViewerTab] = useState<"general" | "categories" | "special">("general");
   const [finalizedWindow, setFinalizedWindow] = useState<{ start: number | null; end: number | null }>(() => ({
@@ -347,6 +357,16 @@ export function TimingDashboard({
   );
   const [activeInstanceId, setActiveInstanceId] = useState<string | null>(() =>
     activeRace?.isMultiStage ? raceInstances[0]?.id ?? null : null
+  );
+  const [finalizeDialogOpen, setFinalizeDialogOpen] = useState(false);
+  const [finalizeAggregationMode, setFinalizeAggregationMode] = useState<"time" | "points">(
+    activeRace?.evaluationMethod ?? "time"
+  );
+  const [selectedAggregationInstances, setSelectedAggregationInstances] = useState<string[]>(() =>
+    raceInstances.filter((instance) => instance.includeInResult).map((instance) => instance.id)
+  );
+  const [selectedAggregationSessions, setSelectedAggregationSessions] = useState<string[]>(() =>
+    (activeRace?.sessions ?? []).map((session) => session.id)
   );
 
   useEffect(() => {
@@ -366,6 +386,14 @@ export function TimingDashboard({
       return raceInstances[0]?.id ?? null;
     });
   }, [activeRace?.isMultiStage, raceInstances]);
+
+  useEffect(() => {
+    setFinalizeAggregationMode(activeRace?.evaluationMethod ?? "time");
+    setSelectedAggregationInstances(
+      raceInstances.filter((instance) => instance.includeInResult).map((instance) => instance.id)
+    );
+    setSelectedAggregationSessions((activeRace?.sessions ?? []).map((session) => session.id));
+  }, [activeRace?.evaluationMethod, activeRace?.sessions, raceInstances]);
 
   useEffect(() => {
     setFinalizedWindow({ start: activeRace?.raceStartTime ?? null, end: activeRace?.raceEndTime ?? null });
@@ -416,6 +444,9 @@ export function TimingDashboard({
 
   const includedInstanceIds = useMemo(() => {
     if (!activeRace?.isMultiStage) return [] as string[];
+    if (activeRace.finalAggregation?.instanceIds?.length) {
+      return activeRace.finalAggregation.instanceIds;
+    }
     const fromInstances = raceInstances
       .filter((instance) => instance.includeInResult)
       .map((instance) => instance.id);
@@ -425,11 +456,12 @@ export function TimingDashboard({
     }
 
     return fromInstances;
-  }, [activeRace?.includeInstancesInResult, activeRace?.isMultiStage, raceInstances]);
+  }, [activeRace?.finalAggregation?.instanceIds, activeRace?.includeInstancesInResult, activeRace?.isMultiStage, raceInstances]);
 
   const getTotalDuration = useCallback(
     (participantId: string) => {
       if (includedInstanceIds.length === 0) return null;
+      if (activeRace?.finalAggregation?.aggregateBy === "points") return null;
       const participant = baseParticipantMap[participantId];
       if (!participant) return null;
       const times = participant.instanceTimes ?? {};
@@ -441,7 +473,7 @@ export function TimingDashboard({
       }
       return total;
     },
-    [baseParticipantMap, includedInstanceIds]
+    [activeRace?.finalAggregation?.aggregateBy, baseParticipantMap, includedInstanceIds]
   );
 
   const activeInstance = useMemo(
@@ -456,6 +488,13 @@ export function TimingDashboard({
       .map((instance) => instance.name);
     return names.length > 0 ? names.join(" · ") : "Instancias sin nombre";
   }, [includedInstanceIds, raceInstances]);
+
+  const aggregationMode = useMemo(
+    () => activeRace?.finalAggregation?.aggregateBy ?? activeRace?.evaluationMethod ?? "time",
+    [activeRace?.evaluationMethod, activeRace?.finalAggregation?.aggregateBy]
+  );
+  const isPointsAggregation = aggregationMode === "points";
+  const aggregationSelectionActive = Boolean(activeRace?.finalAggregation?.instanceIds?.length);
 
   const resolveParticipantsForGroup = (group: TimingGroup) => {
     if (mode === "general") {
@@ -608,6 +647,28 @@ export function TimingDashboard({
   const getElapsedTime = (arrival: ArrivalEntry) => arrival.finishTime - arrival.startTime;
   const getEffectiveDuration = (arrival: ArrivalEntry) => arrival.totalTime ?? getElapsedTime(arrival);
 
+  const getResultValue = useCallback(
+    (arrival: ArrivalEntry) => {
+      if (aggregationSelectionActive && isPointsAggregation) {
+        const points = getAggregatedValue(arrival.participantId);
+        return points !== null && points !== undefined ? points : null;
+      }
+      return getEffectiveDuration(arrival);
+    },
+    [aggregationSelectionActive, getAggregatedValue, getEffectiveDuration, isPointsAggregation]
+  );
+
+  const renderResultValue = useCallback(
+    (arrival: ArrivalEntry) => {
+      const value = getResultValue(arrival);
+      if (aggregationSelectionActive && isPointsAggregation) {
+        return value === null || value === undefined ? "-" : Number(value).toFixed(2);
+      }
+      return formatElapsedTime(value ?? 0);
+    },
+    [aggregationSelectionActive, getResultValue, isPointsAggregation]
+  );
+
   const participantMapById = useMemo(() => {
     return activeParticipants.reduce((acc, participant) => {
       acc[participant.id] = participant;
@@ -615,11 +676,29 @@ export function TimingDashboard({
     }, {} as Record<string, Participant>);
   }, [activeParticipants]);
 
+  const getAggregatedValue = useCallback(
+    (participantId: string) => {
+      const participant = participantMapById[participantId];
+      if (!participant) return null;
+      if (participant.aggregatedType === "points" || participant.aggregatedType === "time") {
+        return participant.aggregatedValue ?? null;
+      }
+      return null;
+    },
+    [participantMapById]
+  );
+
   const finishers = useMemo(() => {
-    return [...finisherEntries, ...duplicateArrivals].sort(
-      (a, b) => getEffectiveDuration(a) - getEffectiveDuration(b)
-    );
-  }, [duplicateArrivals, finisherEntries]);
+    const comparer = (a: ArrivalEntry, b: ArrivalEntry) => {
+      if (isPointsAggregation && aggregationSelectionActive) {
+        const pointsA = getAggregatedValue(a.participantId) ?? 0;
+        const pointsB = getAggregatedValue(b.participantId) ?? 0;
+        return pointsB - pointsA;
+      }
+      return getEffectiveDuration(a) - getEffectiveDuration(b);
+    };
+    return [...finisherEntries, ...duplicateArrivals].sort(comparer);
+  }, [aggregationSelectionActive, duplicateArrivals, finisherEntries, getAggregatedValue, getEffectiveDuration, isPointsAggregation]);
 
   const specialFinishers = useMemo(() => {
     return finishers.filter((arrival) => participantMapById[arrival.participantId]?.isSpecial);
@@ -678,7 +757,21 @@ export function TimingDashboard({
   }, [genderArrivals, participantMapById]);
 
   const showTotalColumn = Boolean(activeRace?.isMultiStage && includedInstanceIds.length > 0);
+  const resultColumnLabel = aggregationSelectionActive && isPointsAggregation ? "Puntos" : "Tiempo";
+  const totalColumnLabel = aggregationSelectionActive
+    ? isPointsAggregation
+      ? "Puntos totales"
+      : "Total acumulado"
+    : "Total acumulado";
   const currentInstanceLabel = activeInstance?.name ?? (activeRace?.isMultiStage ? "Selecciona instancia" : "General");
+  const hasAggregationOptions = useMemo(
+    () =>
+      Boolean(
+        (activeRace?.isMultiStage && raceInstances.length > 0) ||
+          (activeRace?.timingAggregation === "multiple" && (activeRace?.sessions?.length ?? 0) > 0)
+      ),
+    [activeRace?.isMultiStage, activeRace?.sessions?.length, activeRace?.timingAggregation, raceInstances.length]
+  );
 
   const getGroupKeyForParticipant = (participant: Participant, currentMode: TimingMode) => {
     if (currentMode === "general") return "general";
@@ -865,14 +958,15 @@ export function TimingDashboard({
     }
   }, [activeInstanceId, raceId]);
 
-  const handleFinalizeRace = async () => {
+  const handleFinalizeRace = async (options?: { aggregateBy?: "time" | "points"; instanceIds?: string[]; sessionIds?: string[] }) => {
     if (!isAdmin) return;
     const confirmFinish = window.confirm(
       "Esto detendrá todos los cronómetros y guardará el horario de fin. Las clasificaciones y tiempos se mantendrán. ¿Deseas continuar?"
     );
     if (!confirmFinish) return;
+    setIsFinalizing(true);
     try {
-      const result = await finalizeRaceTiming(raceId);
+      const result = await finalizeRaceTiming(raceId, options);
       setFinalizedWindow({ start: result.raceStartTime ?? null, end: result.raceEndTime ?? null });
       clearLocalChronometers();
       toast({
@@ -882,6 +976,9 @@ export function TimingDashboard({
     } catch (error) {
       console.error(error);
       toast({ variant: "destructive", title: "Error", description: "No se pudo finalizar la carrera." });
+    } finally {
+      setIsFinalizing(false);
+      setFinalizeDialogOpen(false);
     }
   };
 
@@ -1252,7 +1349,17 @@ export function TimingDashboard({
               )}
             </div>
             <div className="flex flex-wrap gap-2 md:justify-end">
-              <Button variant="secondary" onClick={handleFinalizeRace} disabled={startingGroupKey !== null}>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  if (hasAggregationOptions) {
+                    setFinalizeDialogOpen(true);
+                  } else {
+                    handleFinalizeRace();
+                  }
+                }}
+                disabled={startingGroupKey !== null || isFinalizing}
+              >
                 Finalizar carrera
               </Button>
               <Button variant="destructive" onClick={handleResetRace} disabled={startingGroupKey !== null}>
@@ -1452,8 +1559,8 @@ export function TimingDashboard({
                     <TableHead>Especial</TableHead>
                     <TableHead className="hidden md:table-cell">Categoría</TableHead>
                     <TableHead>Distancia</TableHead>
-                    <TableHead>Tiempo</TableHead>
-                    {showTotalColumn && <TableHead>Total acumulado</TableHead>}
+                    <TableHead>{resultColumnLabel}</TableHead>
+                    {showTotalColumn && <TableHead>{totalColumnLabel}</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1478,11 +1585,15 @@ export function TimingDashboard({
                       </TableCell>
                       <TableCell>{arrival.distance}</TableCell>
                       <TableCell className="font-mono">
-                        {formatElapsedTime(getElapsedTime(arrival))}
+                        {renderResultValue(arrival)}
                       </TableCell>
                       {showTotalColumn && (
                         <TableCell className="font-mono">
-                          {arrival.totalTime ? formatElapsedTime(arrival.totalTime) : "-"}
+                          {aggregationSelectionActive && isPointsAggregation
+                            ? renderResultValue(arrival)
+                            : arrival.totalTime
+                            ? formatElapsedTime(arrival.totalTime)
+                            : "-"}
                         </TableCell>
                       )}
                     </TableRow>
@@ -1534,7 +1645,7 @@ export function TimingDashboard({
                           <TableHead>Dorsal</TableHead>
                           <TableHead>Nombre</TableHead>
                           <TableHead>Especial</TableHead>
-                          <TableHead>Tiempo</TableHead>
+                          <TableHead>{resultColumnLabel}</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1551,7 +1662,7 @@ export function TimingDashboard({
                               )}
                             </TableCell>
                             <TableCell className="font-mono">
-                              {formatElapsedTime(getElapsedTime(arrival))}
+                              {renderResultValue(arrival)}
                             </TableCell>
                           </TableRow>
                         ))}
@@ -1607,7 +1718,7 @@ export function TimingDashboard({
                           <TableHead>Especial</TableHead>
                           <TableHead className="hidden md:table-cell">Categoría</TableHead>
                           <TableHead>Distancia</TableHead>
-                          <TableHead>Tiempo</TableHead>
+                          <TableHead>{resultColumnLabel}</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1632,7 +1743,7 @@ export function TimingDashboard({
                             </TableCell>
                             <TableCell>{arrival.distance}</TableCell>
                             <TableCell className="font-mono">
-                              {formatElapsedTime(getElapsedTime(arrival))}
+                              {renderResultValue(arrival)}
                             </TableCell>
                           </TableRow>
                         ))}
@@ -1681,7 +1792,7 @@ export function TimingDashboard({
                           <TableHead>Nombre</TableHead>
                           <TableHead className="hidden md:table-cell">Categoría</TableHead>
                           <TableHead>Distancia</TableHead>
-                          <TableHead>Tiempo</TableHead>
+                          <TableHead>{resultColumnLabel}</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1702,7 +1813,7 @@ export function TimingDashboard({
                             </TableCell>
                             <TableCell>{arrival.distance}</TableCell>
                             <TableCell className="font-mono">
-                              {formatElapsedTime(getElapsedTime(arrival))}
+                              {renderResultValue(arrival)}
                             </TableCell>
                           </TableRow>
                         ))}
@@ -1734,7 +1845,7 @@ export function TimingDashboard({
                                 <TableHead>#</TableHead>
                                 <TableHead>Dorsal</TableHead>
                                 <TableHead>Nombre</TableHead>
-                                <TableHead>Tiempo</TableHead>
+                                <TableHead>{resultColumnLabel}</TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -1747,7 +1858,7 @@ export function TimingDashboard({
                                     <Badge variant="secondary">Especial</Badge>
                                   </TableCell>
                                   <TableCell className="font-mono">
-                                    {formatElapsedTime(getElapsedTime(arrival))}
+                                    {renderResultValue(arrival)}
                                   </TableCell>
                                 </TableRow>
                               ))}
@@ -1784,7 +1895,7 @@ export function TimingDashboard({
                                 <TableHead>Nombre</TableHead>
                                 <TableHead className="hidden md:table-cell">Categoría</TableHead>
                                 <TableHead>Distancia</TableHead>
-                                <TableHead>Tiempo</TableHead>
+                                <TableHead>{resultColumnLabel}</TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -1805,7 +1916,7 @@ export function TimingDashboard({
                                   </TableCell>
                                   <TableCell>{arrival.distance}</TableCell>
                                   <TableCell className="font-mono">
-                                    {formatElapsedTime(getElapsedTime(arrival))}
+                                    {renderResultValue(arrival)}
                                   </TableCell>
                                 </TableRow>
                               ))}
@@ -1822,6 +1933,109 @@ export function TimingDashboard({
         </CardContent>
       </Card>
       )}
+
+      <Dialog open={finalizeDialogOpen} onOpenChange={setFinalizeDialogOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Finalizar carrera y consolidar resultados</DialogTitle>
+            <DialogDescription>
+              Elige qué etapas o jornadas sumar y si consolidar por tiempos o puntos antes de cerrar la carrera.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Modo de consolidación</Label>
+              <RadioGroup
+                value={finalizeAggregationMode}
+                onValueChange={(value) => setFinalizeAggregationMode(value as "time" | "points")}
+                className="grid grid-cols-2 gap-2"
+              >
+                <Label
+                  className={cn(
+                    "flex cursor-pointer items-center gap-2 rounded-md border p-3",
+                    finalizeAggregationMode === "time" && "border-primary"
+                  )}
+                >
+                  <RadioGroupItem value="time" />
+                  Sumar tiempos
+                </Label>
+                <Label
+                  className={cn(
+                    "flex cursor-pointer items-center gap-2 rounded-md border p-3",
+                    finalizeAggregationMode === "points" && "border-primary"
+                  )}
+                >
+                  <RadioGroupItem value="points" />
+                  Sumar puntos
+                </Label>
+              </RadioGroup>
+            </div>
+
+            {raceInstances.length > 0 && (
+              <div className="space-y-2">
+                <Label>Etapas/instancias a sumar</Label>
+                <div className="grid gap-2 md:grid-cols-2">
+                  {raceInstances.map((instance) => (
+                    <Label key={instance.id} className="flex items-center gap-2">
+                      <Checkbox
+                        checked={selectedAggregationInstances.includes(instance.id)}
+                        onCheckedChange={(checked) => {
+                          setSelectedAggregationInstances((current) =>
+                            checked
+                              ? Array.from(new Set([...current, instance.id]))
+                              : current.filter((value) => value !== instance.id)
+                          );
+                        }}
+                      />
+                      {instance.name || "Instancia"}
+                    </Label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {activeRace?.sessions && activeRace.sessions.length > 0 && (
+              <div className="space-y-2">
+                <Label>Jornadas/días a sumar</Label>
+                <div className="grid gap-2 md:grid-cols-2">
+                  {activeRace.sessions.map((session) => (
+                    <Label key={session.id} className="flex items-center gap-2">
+                      <Checkbox
+                        checked={selectedAggregationSessions.includes(session.id)}
+                        onCheckedChange={(checked) => {
+                          setSelectedAggregationSessions((current) =>
+                            checked
+                              ? Array.from(new Set([...current, session.id]))
+                              : current.filter((value) => value !== session.id)
+                          );
+                        }}
+                      />
+                      {session.label || new Date(session.startTime).toLocaleString()}
+                    </Label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setFinalizeDialogOpen(false)} disabled={isFinalizing}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() =>
+                handleFinalizeRace({
+                  aggregateBy: finalizeAggregationMode,
+                  instanceIds: selectedAggregationInstances,
+                  sessionIds: selectedAggregationSessions,
+                })
+              }
+              disabled={isFinalizing}
+            >
+              Consolidar y finalizar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -43,6 +43,7 @@ const normalizeRace = (data: Omit<Race, "id">): Omit<Race, "id"> => ({
     raceEndTime: data.raceEndTime ?? null,
     finalized: data.finalized ?? false,
     sessions: data.sessions ?? [],
+    finalAggregation: data.finalAggregation ?? null,
     name: data.name,
     eventDate: data.eventDate,
 });
@@ -65,6 +66,10 @@ export async function getParticipants(raceId?: string | null): Promise<Participa
         replacedById: data.replacedById ?? null,
         teamId: data.teamId ?? null,
         instanceTimes: data.instanceTimes ?? {},
+        aggregatedType: data.aggregatedType ?? null,
+        aggregatedValue: data.aggregatedValue ?? null,
+        aggregatedInstanceIds: data.aggregatedInstanceIds ?? [],
+        aggregatedSessionIds: data.aggregatedSessionIds ?? [],
     } satisfies Participant;
   });
 

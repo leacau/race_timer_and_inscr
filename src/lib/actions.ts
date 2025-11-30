@@ -790,9 +790,25 @@ export async function deleteRace(id: string) {
   revalidatePath("/races");
 }
 
-export async function finalizeRaceTiming(raceId: string) {
+export async function finalizeRaceTiming(
+  raceId: string,
+  options?: { aggregateBy?: "time" | "points"; instanceIds?: string[]; sessionIds?: string[] }
+) {
   const [race, participants] = await Promise.all([db.getRace(raceId), db.getParticipants(raceId)]);
   const activeParticipants = participants.filter((participant) => !participant.replacedById);
+  const aggregateBy = options?.aggregateBy ?? race?.evaluationMethod ?? "time";
+  const selectedInstanceIds =
+    options?.instanceIds ??
+    (race?.isMultiStage && race?.instances?.length
+      ? (race.includeInstancesInResult
+          ? race.instances.some((instance) => instance.includeInResult)
+            ? race.instances.filter((instance) => instance.includeInResult)
+            : race.instances
+          : race.instances.filter((instance) => instance.includeInResult)
+        ).map((instance) => instance.id)
+      : []);
+  const selectedSessionIds =
+    options?.sessionIds ?? (race?.timingAggregation === "multiple" ? (race.sessions ?? []).map((session) => session.id) : []);
   const knownStarts = activeParticipants
     .flatMap((participant) => {
       const baseTimes: number[] = [];
@@ -816,19 +832,25 @@ export async function finalizeRaceTiming(raceId: string) {
     endTime: raceEndTime,
   };
 
+  const finalAggregation =
+    race?.isMultiStage || race?.timingAggregation === "multiple"
+      ? {
+          aggregateBy,
+          instanceIds: selectedInstanceIds ?? [],
+          sessionIds: selectedSessionIds ?? [],
+        }
+      : null;
+
   await db.updateRaceFields(raceId, {
     raceStartTime,
     raceEndTime,
     finalized: true,
     sessions: race?.timingAggregation === "multiple" ? [...sessions, sessionEntry] : sessions,
+    finalAggregation,
   });
 
-  if (race?.isMultiStage && (race.instances?.length ?? 0) > 0) {
-    const includedInstances = race.includeInstancesInResult
-      ? (race.instances.some((instance) => instance.includeInResult)
-          ? race.instances.filter((instance) => instance.includeInResult)
-          : race.instances)
-      : race.instances.filter((instance) => instance.includeInResult);
+  if (race?.isMultiStage && (race.instances?.length ?? 0) > 0 && selectedInstanceIds.length > 0) {
+    const includedInstances = race.instances.filter((instance) => selectedInstanceIds.includes(instance.id));
 
     if (includedInstances.length > 0) {
       const instanceIds = includedInstances.map((instance) => instance.id);
@@ -837,21 +859,41 @@ export async function finalizeRaceTiming(raceId: string) {
           const times = participant.instanceTimes ?? {};
           let total = 0;
           let earliest: number | null = participant.startTime ?? null;
-          for (const id of instanceIds) {
-            const record = times[id];
-            if (!record?.startTime || !record?.finishTime) return null;
-            if (earliest === null || record.startTime < earliest) {
-              earliest = record.startTime;
+          if (aggregateBy === "time") {
+            for (const id of instanceIds) {
+              const record = times[id];
+              if (!record?.startTime || !record?.finishTime) return null;
+              if (earliest === null || record.startTime < earliest) {
+                earliest = record.startTime;
+              }
+              total += record.finishTime - record.startTime;
             }
-            total += record.finishTime - record.startTime;
+          } else {
+            total = instanceIds.reduce((acc, id) => acc + (times[id]?.points ?? 0), 0);
           }
-          if (earliest === null) return null;
+
+          const aggregationFields: Partial<ParticipantFirestoreData> = {
+            aggregatedType: aggregateBy,
+            aggregatedValue: aggregateBy === "time" ? total : total ?? 0,
+            aggregatedInstanceIds: instanceIds,
+            aggregatedSessionIds: selectedSessionIds ?? [],
+          };
+
+          if (aggregateBy === "time") {
+            if (earliest === null) return null;
+            return {
+              id: participant.id,
+              data: {
+                startTime: earliest,
+                finishTime: earliest + total,
+                ...aggregationFields,
+              },
+            } as { id: string; data: Partial<ParticipantFirestoreData> };
+          }
+
           return {
             id: participant.id,
-            data: {
-              startTime: earliest,
-              finishTime: earliest + total,
-            },
+            data: aggregationFields,
           } as { id: string; data: Partial<ParticipantFirestoreData> };
         })
         .filter(Boolean) as { id: string; data: Partial<ParticipantFirestoreData> }[];
@@ -890,6 +932,10 @@ export async function resetRaceTiming(raceId: string) {
           Object.keys(participant.instanceTimes ?? {}).length > 0 || Object.keys(instanceDefaults).length > 0
             ? instanceDefaults
             : undefined,
+        aggregatedType: null,
+        aggregatedValue: null,
+        aggregatedInstanceIds: [],
+        aggregatedSessionIds: [],
       },
     }))
   );
@@ -899,6 +945,7 @@ export async function resetRaceTiming(raceId: string) {
     raceEndTime: null,
     finalized: false,
     sessions: race?.timingAggregation === "multiple" ? [] : race?.sessions ?? [],
+    finalAggregation: null,
   });
 
   revalidatePath("/");

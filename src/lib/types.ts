@@ -30,6 +30,7 @@ export type RaceSession = {
 export type InstanceTime = {
   startTime: number | null;
   finishTime: number | null;
+  points?: number | null;
 };
 
 export type Team = {
@@ -62,6 +63,10 @@ export type Participant = {
   replacedById?: string | null;
   teamId?: string | null;
   instanceTimes?: Record<string, InstanceTime>;
+  aggregatedType?: 'time' | 'points' | null;
+  aggregatedValue?: number | null;
+  aggregatedInstanceIds?: string[];
+  aggregatedSessionIds?: string[];
 };
 
 // Tipo para el formulario del cliente y la creación
@@ -138,6 +143,11 @@ export type Race = {
   raceEndTime?: number | null;
   finalized?: boolean;
   sessions?: RaceSession[];
+  finalAggregation?: {
+    aggregateBy: 'time' | 'points';
+    instanceIds: string[];
+    sessionIds: string[];
+  };
 };
 
 export type RaceInput = Omit<
