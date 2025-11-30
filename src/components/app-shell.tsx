@@ -14,7 +14,7 @@ import {
   useSidebar,
   SidebarProvider,
 } from "@/components/ui/sidebar";
-import { Settings, LogOut, LayoutGrid, CalendarIcon, PackageIcon } from "lucide-react";
+import { Settings, LogOut, LayoutGrid, CalendarIcon } from "lucide-react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { RaceTimerProLogo } from "./icons";
@@ -24,7 +24,6 @@ import { Switch } from "./ui/switch";
 import { Separator } from "./ui/separator";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import { AppContext } from "@/context/app-context";
-import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,38 +33,24 @@ import {
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { Toaster } from "./ui/toaster";
-import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
-import { Calendar } from "./ui/calendar";
-import { format } from "date-fns";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "./ui/select";
 
 const navItems = [
   { href: "/", icon: LayoutGrid, label: "Dashboard" },
   { href: "/races", icon: CalendarIcon, label: "Carreras" },
-  { href: "/kits", icon: PackageIcon, label: "Entrega de kits" },
 ];
 
 function AppHeader() {
-  const { role, setRole, raceDate, setRaceDate, ageCalculationMethod, setAgeCalculationMethod } = React.useContext(AppContext);
+  const { role, setRole } = React.useContext(AppContext);
   const { isMobile } = useSidebar();
 
   const pageTitles: { [key: string]: string } = {
     "/": "Dashboard",
     "/races": "Carreras",
-    "/kits": "Entrega de kits",
   };
   const pathname = usePathname();
   const title = pathname.startsWith("/races/")
     ? "Detalle de carrera"
-    : pathname.startsWith("/kits/")
-      ? "Entrega de kits"
-      : pageTitles[pathname] ?? "Panel";
+    : pageTitles[pathname] ?? "Panel";
 
   return (
     <header className="flex h-16 items-center justify-between gap-4 border-b bg-card px-4 md:px-6">
@@ -74,53 +59,6 @@ function AppHeader() {
         <h1 className="text-lg font-semibold tracking-tight">{title}</h1>
       </div>
       <div className="flex items-center gap-4">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm">
-              <Settings className="mr-2 h-4 w-4" />
-              <span>Ajustes de Carrera</span>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-80 p-4">
-            <div className="space-y-4">
-              <div>
-                  <Label>Fecha de la Carrera</Label>
-                  <Popover>
-                      <PopoverTrigger asChild>
-                          <Button
-                              variant={"outline"}
-                              className={cn("w-full justify-start text-left font-normal", !raceDate && "text-muted-foreground")}
-                          >
-                              <CalendarIcon className="mr-2 h-4 w-4" />
-                              {raceDate ? format(raceDate, "PPP") : <span>Elige una fecha</span>}
-                          </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0">
-                          <Calendar
-                              mode="single"
-                              selected={raceDate}
-                              onSelect={setRaceDate}
-                              initialFocus
-                          />
-                      </PopoverContent>
-                  </Popover>
-              </div>
-              <div>
-                  <Label>Calcular Edad Al</Label>
-                  <Select value={ageCalculationMethod} onValueChange={(value) => setAgeCalculationMethod(value as 'raceDay' | 'endOfYear')}>
-                      <SelectTrigger>
-                          <SelectValue placeholder="Método de cálculo" />
-                      </SelectTrigger>
-                      <SelectContent>
-                          <SelectItem value="raceDay">Día de la carrera</SelectItem>
-                          <SelectItem value="endOfYear">Final del año</SelectItem>
-                      </SelectContent>
-                  </Select>
-              </div>
-            </div>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
         <div className="flex items-center gap-2">
           <Label htmlFor="role-switch" className="text-sm font-medium">
             {role === "admin" ? "Administrador" : "Espectador"}
