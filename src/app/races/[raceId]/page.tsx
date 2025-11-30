@@ -3,9 +3,10 @@ import { RaceTabs } from "@/components/race-tabs";
 import { DataError } from "@/components/data-error";
 import { getCategories, getParticipants, getRace, getRunnerChanges, getTeams } from "@/lib/data";
 
-export default async function RaceDetailPage({ params }: { params: { raceId: string } }) {
+export default async function RaceDetailPage({ params }: { params: Promise<{ raceId: string }> }) {
   try {
-    const race = await getRace(params.raceId);
+    const { raceId } = await params;
+    const race = await getRace(raceId);
 
     if (!race) {
       notFound();

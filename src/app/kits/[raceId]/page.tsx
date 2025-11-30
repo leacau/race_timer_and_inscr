@@ -3,9 +3,10 @@ import { getCategories, getParticipants, getRace } from "@/lib/data";
 import { KitDelivery } from "@/components/kit-delivery";
 import { DataError } from "@/components/data-error";
 
-export default async function KitDeliveryPage({ params }: { params: { raceId: string } }) {
+export default async function KitDeliveryPage({ params }: { params: Promise<{ raceId: string }> }) {
   try {
-    const race = await getRace(params.raceId);
+    const { raceId } = await params;
+    const race = await getRace(raceId);
 
     if (!race) {
       notFound();
