@@ -16,6 +16,7 @@ import type {
   ParticipantSnapshot,
   Race,
   RaceInput,
+  Role,
 } from "./types";
 
 type SelectionTarget = { type: "selection"; ids: string[] };
@@ -953,4 +954,13 @@ export async function resetRaceTiming(raceId: string) {
   revalidatePath(`/kits/${raceId}`);
 
   return { cleared: participants.length };
+}
+
+export async function updateUserRole(userId: string, role: Role) {
+  await db.setUserRole(userId, role);
+  revalidatePath("/admin/users");
+}
+
+export async function trackVisitorEmail(email: string) {
+  await db.saveVisitorEmail(email);
 }

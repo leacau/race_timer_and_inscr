@@ -6,6 +6,7 @@ import {
     collection,
     getDocs,
     addDoc,
+    setDoc,
     updateDoc,
     deleteDoc,
     doc,
@@ -24,6 +25,8 @@ import type {
   RaceInput,
   RunnerChange,
   Team,
+  Role,
+  UserProfile,
 } from "./types";
 
 const normalizeRace = (data: Omit<Race, "id">): Omit<Race, "id"> => ({
@@ -308,4 +311,38 @@ export async function updateTeam(id: string, data: Partial<Omit<Team, "id">>): P
 export async function deleteTeam(id: string): Promise<void> {
     const teamRef = doc(db, "teams", id);
     await deleteDoc(teamRef);
+}
+
+export async function getUsers(): Promise<UserProfile[]> {
+    const usersCol = collection(db, "users");
+    const snapshot = await getDocs(usersCol);
+    return snapshot.docs.map((doc) => {
+        const data = doc.data() as Omit<UserProfile, "id">;
+        return {
+            id: doc.id,
+            email: data.email,
+            displayName: data.displayName ?? "",
+            role: (data.role as Role) ?? "unassigned",
+            entryType: (data.entryType as UserProfile["entryType"]) ?? "organization",
+            provider: data.provider,
+            createdAt: data.createdAt,
+        } satisfies UserProfile;
+    });
+}
+
+export async function setUserRole(userId: string, role: Role): Promise<void> {
+    const userRef = doc(db, "users", userId);
+    await updateDoc(userRef, { role });
+}
+
+export async function ensureUserDocument(userId: string, data: Omit<UserProfile, "id">) {
+    const userRef = doc(db, "users", userId);
+    const snap = await getDoc(userRef);
+    if (!snap.exists()) {
+        await setDoc(userRef, data);
+    }
+}
+
+export async function saveVisitorEmail(email: string) {
+    await addDoc(collection(db, "visitors"), { email, createdAt: new Date().toISOString() });
 }

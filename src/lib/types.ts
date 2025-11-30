@@ -1,5 +1,6 @@
 
 
+export type Role = "admin" | "client" | "timer" | "kit" | "visitor" | "unassigned";
 export type AgeCalculationMethod = 'raceDay' | 'endOfYear';
 
 export type RaceDiscipline =
@@ -154,3 +155,13 @@ export type RaceInput = Omit<
   Race,
   'id' | 'raceStartTime' | 'raceEndTime' | 'finalized' | 'sessions'
 >;
+
+export type UserProfile = {
+  id: string;
+  email: string;
+  displayName?: string | null;
+  role: Role;
+  entryType: "organization" | "visitor";
+  provider?: string;
+  createdAt?: unknown;
+};

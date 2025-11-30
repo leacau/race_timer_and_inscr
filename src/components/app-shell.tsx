@@ -12,9 +12,8 @@ import {
   SidebarInset,
   SidebarTrigger,
   useSidebar,
-  SidebarProvider,
 } from "@/components/ui/sidebar";
-import { Settings, LogOut, LayoutGrid, CalendarIcon } from "lucide-react";
+import { Settings, LogOut, LayoutGrid, CalendarIcon, Shield } from "lucide-react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { RaceTimerProLogo } from "./icons";
@@ -31,15 +30,15 @@ import {
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { Toaster } from "./ui/toaster";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { Badge } from "./ui/badge";
 
-const navItems = [
+const baseNavItems = [
   { href: "/", icon: LayoutGrid, label: "Dashboard" },
   { href: "/races", icon: CalendarIcon, label: "Carreras" },
 ];
 
 function AppHeader() {
-  const { role, setRole } = React.useContext(AppContext);
+  const { role, user, signOut } = React.useContext(AppContext);
   const { isMobile } = useSidebar();
 
   const pageTitles: { [key: string]: string } = {
@@ -59,19 +58,8 @@ function AppHeader() {
       </div>
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2">
-          <Select value={role} onValueChange={(value) => setRole(value as any)}>
-            <SelectTrigger className="w-[200px]">
-              <SelectValue placeholder="Selecciona rol" />
-            </SelectTrigger>
-            <SelectContent align="end">
-              <SelectItem value="unassigned">Sin rol asignado</SelectItem>
-              <SelectItem value="admin">Administrador</SelectItem>
-              <SelectItem value="client">Cliente</SelectItem>
-              <SelectItem value="timer">Cronometrador</SelectItem>
-              <SelectItem value="kit">Entregador de kits</SelectItem>
-              <SelectItem value="visitor">Visitante</SelectItem>
-            </SelectContent>
-          </Select>
+          <Badge variant={role === "admin" ? "default" : "outline"}>{role}</Badge>
+          {user?.email && <span className="text-sm text-muted-foreground">{user.email}</span>}
         </div>
         <Separator orientation="vertical" className="h-8" />
         <DropdownMenu>
@@ -89,7 +77,7 @@ function AppHeader() {
               <Settings className="mr-2 h-4 w-4" />
               <span>Configuración</span>
             </DropdownMenuItem>
-            <DropdownMenuItem>
+            <DropdownMenuItem onSelect={signOut}>
               <LogOut className="mr-2 h-4 w-4" />
               <span>Cerrar Sesión</span>
             </DropdownMenuItem>
@@ -102,6 +90,7 @@ function AppHeader() {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { role } = React.useContext(AppContext);
   const [isClient, setIsClient] = React.useState(false);
 
   React.useEffect(() => {
@@ -112,43 +101,51 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return null; // or a loading skeleton
   }
   
+  const navItems = React.useMemo(() => {
+    const items = [...baseNavItems];
+    if (role === "admin") {
+      items.push({ href: "/admin/users", icon: Shield, label: "Usuarios" });
+    }
+    return items;
+  }, [role]);
+
   return (
-      <>
-        <Sidebar>
-          <SidebarHeader>
-            <div className="flex items-center gap-2">
-              <RaceTimerProLogo className="size-8" />
-              <span className="text-lg font-semibold text-sidebar-foreground">
-                RaceTimer Pro
-              </span>
-            </div>
-          </SidebarHeader>
-          <SidebarContent>
-            <SidebarMenu>
-              {navItems.map((item) => (
-                <SidebarMenuItem key={item.href}>
-                  <Link href={item.href}>
-                    <SidebarMenuButton
-                      isActive={pathname === item.href}
-                      tooltip={item.label}
-                    >
-                      <item.icon />
-                      <span>{item.label}</span>
-                    </SidebarMenuButton>
-                  </Link>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarContent>
-          <SidebarFooter>
-            {/* Footer content if any */}
-          </SidebarFooter>
-        </Sidebar>
-        <SidebarInset>
-          <AppHeader />
-          <main className="flex-1 overflow-y-auto p-4 md:p-6">{children}</main>
-        </SidebarInset>
-        <Toaster />
-      </>
+    <>
+      <Sidebar>
+        <SidebarHeader>
+          <div className="flex items-center gap-2">
+            <RaceTimerProLogo className="size-8" />
+            <span className="text-lg font-semibold text-sidebar-foreground">
+              RaceTimer Pro
+            </span>
+          </div>
+        </SidebarHeader>
+        <SidebarContent>
+          <SidebarMenu>
+            {navItems.map((item) => (
+              <SidebarMenuItem key={item.href}>
+                <Link href={item.href}>
+                  <SidebarMenuButton
+                    isActive={pathname === item.href}
+                    tooltip={item.label}
+                  >
+                    <item.icon />
+                    <span>{item.label}</span>
+                  </SidebarMenuButton>
+                </Link>
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
+        </SidebarContent>
+        <SidebarFooter>
+          {/* Footer content if any */}
+        </SidebarFooter>
+      </Sidebar>
+      <SidebarInset>
+        <AppHeader />
+        <main className="flex-1 overflow-y-auto p-4 md:p-6">{children}</main>
+      </SidebarInset>
+      <Toaster />
+    </>
   );
 }
