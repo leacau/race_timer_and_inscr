@@ -197,14 +197,20 @@ export async function bulkDeleteParticipants(ids: string[]) {
 export async function updateParticipantTime(
   id: string,
   startTime: number,
-  finishTime: number
+  finishTime: number,
+  instanceId?: string | null
 ) {
-  await db.updateParticipantTime(id, startTime, finishTime);
+  await db.updateParticipantTime(id, startTime, finishTime, instanceId);
   revalidatePath("/");
   revalidatePath("/competitors");
 }
 
-export async function startTimingGroup(raceId: string, mode: TimingMode, groupId?: string | null) {
+export async function startTimingGroup(
+  raceId: string,
+  mode: TimingMode,
+  groupId?: string | null,
+  instanceId?: string | null
+) {
   const participants = await db.getParticipants(raceId);
   const activeParticipants = participants.filter((participant) => !participant.replacedById);
   let targets: Participant[] = [];
@@ -230,7 +236,14 @@ export async function startTimingGroup(raceId: string, mode: TimingMode, groupId
   await db.bulkUpdateParticipants(
     targets.map((participant) => ({
       id: participant.id,
-      data: { startTime, finishTime: null },
+      data: instanceId
+        ? {
+            instanceTimes: {
+              ...(participant.instanceTimes ?? {}),
+              [instanceId]: { startTime, finishTime: null },
+            },
+          }
+        : { startTime, finishTime: null },
     }))
   );
 
@@ -238,7 +251,12 @@ export async function startTimingGroup(raceId: string, mode: TimingMode, groupId
   return { updated: targets.length, startTime };
 }
 
-export async function resetTimingGroup(raceId: string, mode: TimingMode, groupId?: string | null) {
+export async function resetTimingGroup(
+  raceId: string,
+  mode: TimingMode,
+  groupId?: string | null,
+  instanceId?: string | null
+) {
   const participants = await db.getParticipants(raceId);
   const activeParticipants = participants.filter((participant) => !participant.replacedById);
   let targets: Participant[] = [];
@@ -258,7 +276,14 @@ export async function resetTimingGroup(raceId: string, mode: TimingMode, groupId
   await db.bulkUpdateParticipants(
     targets.map((participant) => ({
       id: participant.id,
-      data: { startTime: null, finishTime: null },
+      data: instanceId
+        ? {
+            instanceTimes: {
+              ...(participant.instanceTimes ?? {}),
+              [instanceId]: { startTime: null, finishTime: null },
+            },
+          }
+        : { startTime: null, finishTime: null },
     }))
   );
 

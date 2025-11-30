@@ -20,6 +20,11 @@ export type RaceInstance = {
   includeInResult: boolean;
 };
 
+export type InstanceTime = {
+  startTime: number | null;
+  finishTime: number | null;
+};
+
 export type Team = {
   id: string;
   raceId: string;
@@ -49,6 +54,7 @@ export type Participant = {
   replacedFromId?: string | null;
   replacedById?: string | null;
   teamId?: string | null;
+  instanceTimes?: Record<string, InstanceTime>;
 };
 
 // Tipo para el formulario del cliente y la creación

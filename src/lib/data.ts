@@ -60,6 +60,7 @@ export async function getParticipants(raceId?: string | null): Promise<Participa
         replacedFromId: data.replacedFromId ?? null,
         replacedById: data.replacedById ?? null,
         teamId: data.teamId ?? null,
+        instanceTimes: data.instanceTimes ?? {},
     } satisfies Participant;
   });
 
@@ -116,9 +117,28 @@ export async function deleteParticipant(id: string): Promise<void> {
     await deleteDoc(doc(db, "participants", id));
 }
 
-export async function updateParticipantTime(id: string, startTime: number, finishTime: number): Promise<void> {
+export async function updateParticipantTime(
+    id: string,
+    startTime: number,
+    finishTime: number,
+    instanceId?: string | null
+): Promise<void> {
     const participantRef = doc(db, "participants", id);
-    await updateDoc(participantRef, { startTime, finishTime });
+    if (!instanceId) {
+        await updateDoc(participantRef, { startTime, finishTime });
+        return;
+    }
+
+    const snapshot = await getDoc(participantRef);
+    const data = snapshot.data() as ParticipantFirestoreData | undefined;
+    const currentInstances = data?.instanceTimes ?? {};
+    const current = currentInstances[instanceId] ?? { startTime: null, finishTime: null };
+    await updateDoc(participantRef, {
+        instanceTimes: {
+            ...currentInstances,
+            [instanceId]: { ...current, startTime, finishTime },
+        },
+    });
 }
 
 export async function bulkDeleteParticipants(ids: string[]): Promise<void> {

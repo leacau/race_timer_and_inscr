@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState, useContext, useEffect } from "react";
+import React, { useMemo, useState, useContext, useEffect, useCallback } from "react";
 import * as XLSX from "xlsx";
 import type { Participant, Category, Race } from "@/lib/types";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { AppContext } from "@/context/app-context";
 import { formatElapsedTime } from "@/lib/utils";
@@ -43,6 +44,8 @@ type ArrivalEntry = {
   finishTime: number;
   isSpecial: boolean;
   isDuplicate?: boolean;
+  totalTime?: number | null;
+  instanceId?: string | null;
 };
 
 const modeOptions: { value: TimingMode; label: string }[] = [
@@ -326,11 +329,28 @@ export function TimingDashboard({
   const [duplicateCounters, setDuplicateCounters] = useState<Record<string, number>>({});
   const raceName = activeRace?.name ?? "Carrera";
   const [viewerTab, setViewerTab] = useState<"general" | "categories" | "special">("general");
+  const raceInstances = useMemo(() => activeRace?.instances ?? [], [activeRace]);
+  const [activeInstanceId, setActiveInstanceId] = useState<string | null>(() =>
+    activeRace?.isMultiStage ? raceInstances[0]?.id ?? null : null
+  );
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 500);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (!activeRace?.isMultiStage) {
+      setActiveInstanceId(null);
+      return;
+    }
+    setActiveInstanceId((current) => {
+      if (current && raceInstances.some((instance) => instance.id === current)) {
+        return current;
+      }
+      return raceInstances[0]?.id ?? null;
+    });
+  }, [activeRace?.isMultiStage, raceInstances]);
 
   const categoriesMap = useMemo(() => {
     return categories.reduce((acc, category) => {
@@ -339,16 +359,84 @@ export function TimingDashboard({
     }, {} as Record<string, string>);
   }, [categories]);
 
-  const activeParticipants = useMemo(
+  const baseParticipantMap = useMemo(
+    () =>
+      participants.reduce((acc, participant) => {
+        acc[participant.id] = participant;
+        return acc;
+      }, {} as Record<string, Participant>),
+    [participants]
+  );
+
+  const baseParticipants = useMemo(
     () => participants.filter((participant) => !participant.replacedById),
     [participants]
   );
+
+  const activeParticipants = useMemo(() => {
+    if (!activeRace?.isMultiStage || !activeInstanceId) {
+      return baseParticipants;
+    }
+
+    return baseParticipants.map((participant) => {
+      const instanceTime = participant.instanceTimes?.[activeInstanceId];
+      if (!instanceTime) return participant;
+      return {
+        ...participant,
+        startTime: instanceTime.startTime ?? null,
+        finishTime: instanceTime.finishTime ?? null,
+      };
+    });
+  }, [activeInstanceId, activeRace?.isMultiStage, baseParticipants]);
 
   const getGroupStart = (groupParticipants: Participant[]) => {
     const startTimes = groupParticipants.map((p) => p.startTime).filter(Boolean) as number[];
     if (startTimes.length === 0) return null;
     return Math.min(...startTimes);
   };
+
+  const includedInstanceIds = useMemo(() => {
+    if (!activeRace?.isMultiStage) return [] as string[];
+    const fromInstances = raceInstances
+      .filter((instance) => instance.includeInResult)
+      .map((instance) => instance.id);
+
+    if (activeRace.includeInstancesInResult) {
+      return fromInstances.length > 0 ? fromInstances : raceInstances.map((instance) => instance.id);
+    }
+
+    return fromInstances;
+  }, [activeRace?.includeInstancesInResult, activeRace?.isMultiStage, raceInstances]);
+
+  const getTotalDuration = useCallback(
+    (participantId: string) => {
+      if (includedInstanceIds.length === 0) return null;
+      const participant = baseParticipantMap[participantId];
+      if (!participant) return null;
+      const times = participant.instanceTimes ?? {};
+      let total = 0;
+      for (const instanceId of includedInstanceIds) {
+        const record = times[instanceId];
+        if (!record?.startTime || !record?.finishTime) return null;
+        total += record.finishTime - record.startTime;
+      }
+      return total;
+    },
+    [baseParticipantMap, includedInstanceIds]
+  );
+
+  const activeInstance = useMemo(
+    () => raceInstances.find((instance) => instance.id === activeInstanceId) ?? null,
+    [activeInstanceId, raceInstances]
+  );
+
+  const includedInstanceNames = useMemo(() => {
+    if (includedInstanceIds.length === 0) return "No se suman instancias";
+    const names = raceInstances
+      .filter((instance) => includedInstanceIds.includes(instance.id))
+      .map((instance) => instance.name);
+    return names.length > 0 ? names.join(" · ") : "Instancias sin nombre";
+  }, [includedInstanceIds, raceInstances]);
 
   const resolveParticipantsForGroup = (group: TimingGroup) => {
     if (mode === "general") {
@@ -423,20 +511,51 @@ export function TimingDashboard({
       }));
   }, [mode, activeParticipants, categoriesMap]);
 
-  useEffect(() => {
-    setStoppedGroups((prev) => {
+  const sanitizeStoppedGroups = useCallback(
+    (source: Record<string, { pausedAt: number; referenceStart: number }>) => {
       let changed = false;
-      const next = { ...prev };
-      Object.entries(prev).forEach(([key, value]) => {
+      const next = { ...source };
+      Object.entries(source).forEach(([key, value]) => {
         const group = groups.find((g) => g.key === key);
         if (!group || !group.startTime || group.startTime !== value.referenceStart) {
           delete next[key];
           changed = true;
         }
       });
-      return changed ? next : prev;
-    });
-  }, [groups]);
+      return changed ? next : source;
+    },
+    [groups]
+  );
+
+  const pausedStorageKey = useMemo(
+    () => `timing-paused:${raceId}:${mode}:${activeInstanceId ?? "single"}`,
+    [activeInstanceId, mode, raceId]
+  );
+
+  useEffect(() => {
+    setStoppedGroups((prev) => sanitizeStoppedGroups(prev));
+  }, [sanitizeStoppedGroups]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = localStorage.getItem(pausedStorageKey);
+    if (!stored) {
+      setStoppedGroups({});
+      return;
+    }
+    try {
+      const parsed = JSON.parse(stored) as Record<string, { pausedAt: number; referenceStart: number }>;
+      setStoppedGroups(sanitizeStoppedGroups(parsed));
+    } catch (error) {
+      console.error("Error restoring paused timers", error);
+      setStoppedGroups({});
+    }
+  }, [pausedStorageKey, sanitizeStoppedGroups]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem(pausedStorageKey, JSON.stringify(stoppedGroups));
+  }, [pausedStorageKey, stoppedGroups]);
 
   const startTimeLookup = useMemo(() => {
     const lookup: Record<string, number | null> = {};
@@ -462,8 +581,13 @@ export function TimingDashboard({
         startTime: participant.startTime!,
         finishTime: participant.finishTime!,
         isSpecial: participant.isSpecial ?? false,
+        totalTime: getTotalDuration(participant.id),
+        instanceId: activeInstanceId ?? null,
       }));
-  }, [activeParticipants]);
+  }, [activeInstanceId, activeParticipants, getTotalDuration]);
+
+  const getElapsedTime = (arrival: ArrivalEntry) => arrival.finishTime - arrival.startTime;
+  const getEffectiveDuration = (arrival: ArrivalEntry) => arrival.totalTime ?? getElapsedTime(arrival);
 
   const participantMapById = useMemo(() => {
     return activeParticipants.reduce((acc, participant) => {
@@ -473,8 +597,10 @@ export function TimingDashboard({
   }, [activeParticipants]);
 
   const finishers = useMemo(() => {
-    return [...finisherEntries, ...duplicateArrivals].sort((a, b) => a.finishTime - b.finishTime);
-  }, [finisherEntries, duplicateArrivals]);
+    return [...finisherEntries, ...duplicateArrivals].sort(
+      (a, b) => getEffectiveDuration(a) - getEffectiveDuration(b)
+    );
+  }, [duplicateArrivals, finisherEntries]);
 
   const specialFinishers = useMemo(() => {
     return finishers.filter((arrival) => participantMapById[arrival.participantId]?.isSpecial);
@@ -532,6 +658,9 @@ export function TimingDashboard({
       .filter((entry) => entry.members.length > 0);
   }, [genderArrivals, participantMapById]);
 
+  const showTotalColumn = Boolean(activeRace?.isMultiStage && includedInstanceIds.length > 0);
+  const currentInstanceLabel = activeInstance?.name ?? (activeRace?.isMultiStage ? "Selecciona instancia" : "General");
+
   const getGroupKeyForParticipant = (participant: Participant, currentMode: TimingMode) => {
     if (currentMode === "general") return "general";
     if (currentMode === "distance") return `distance:${participant.distance}`;
@@ -550,7 +679,7 @@ export function TimingDashboard({
     }
     setStartingGroupKey(group.key);
     try {
-      await startTimingGroup(raceId, mode, group.actionGroupId);
+      await startTimingGroup(raceId, mode, group.actionGroupId, activeInstanceId);
       setStoppedGroups((prev) => {
         if (!prev[group.key]) return prev;
         const next = { ...prev };
@@ -588,7 +717,7 @@ export function TimingDashboard({
     }
     setStartingGroupKey(group.key);
     try {
-      await resetTimingGroup(raceId, mode, group.actionGroupId);
+      await resetTimingGroup(raceId, mode, group.actionGroupId, activeInstanceId);
       setStoppedGroups((prev) => {
         const next = { ...prev };
         delete next[group.key];
@@ -664,6 +793,8 @@ export function TimingDashboard({
           finishTime,
           isSpecial: participant.isSpecial ?? false,
           isDuplicate: true,
+          totalTime: getTotalDuration(participant.id),
+          instanceId: activeInstanceId ?? null,
         };
         setDuplicateArrivals((prev) => [...prev, duplicateEntry]);
         setDuplicateCounters((prev) => ({ ...prev, [bib]: nextIndex + 1 }));
@@ -675,7 +806,7 @@ export function TimingDashboard({
         return;
       }
 
-      await updateParticipantTime(participant.id, effectiveStartTime, finishTime);
+      await updateParticipantTime(participant.id, effectiveStartTime, finishTime, activeInstanceId);
       toast({
         title: "Tiempo registrado",
         description: `Se registró la llegada del dorsal ${bib}.`,
@@ -698,8 +829,8 @@ export function TimingDashboard({
     const rows = finishers.map((arrival, index) => {
       const participant = participantMapById[arrival.participantId];
       const categoryLabel = arrival.categoryId ? categoriesMap[arrival.categoryId] || "Sin categoría" : "Sin categoría";
-      const elapsed = formatElapsedTime(arrival.finishTime - arrival.startTime);
-      return {
+      const elapsed = formatElapsedTime(getElapsedTime(arrival));
+      const baseRow: Record<string, string | number> = {
         "Posición": index + 1,
         Dorsal: arrival.displayBib,
         Nombre: participant?.name ?? arrival.name,
@@ -717,6 +848,12 @@ export function TimingDashboard({
         "Hora de llegada": new Date(arrival.finishTime).toLocaleString(),
         Tiempo: elapsed,
       };
+
+      if (showTotalColumn) {
+        baseRow["Total acumulado"] = arrival.totalTime ? formatElapsedTime(arrival.totalTime) : "";
+      }
+
+      return baseRow;
     });
 
     if (format === "xlsx") {
@@ -735,7 +872,10 @@ export function TimingDashboard({
             Género: participant ? genderLabels[participant.gender] : "",
             Categoría: categoryLabel,
             Distancia: arrival.distance,
-            Tiempo: formatElapsedTime(arrival.finishTime - arrival.startTime),
+            Tiempo: formatElapsedTime(getElapsedTime(arrival)),
+            ...(showTotalColumn
+              ? { "Total acumulado": arrival.totalTime ? formatElapsedTime(arrival.totalTime) : "" }
+              : {}),
           };
         });
         const specialSheet = XLSX.utils.json_to_sheet(specialRows);
@@ -745,36 +885,55 @@ export function TimingDashboard({
       return;
     }
 
+    const generalHeaders = showTotalColumn
+      ? ["#", "Dorsal", "Nombre completo", "Especial", "Categoría", "Distancia", "Tiempo", "Total"]
+      : ["#", "Dorsal", "Nombre completo", "Especial", "Categoría", "Distancia", "Tiempo"];
+    const generalWeights = showTotalColumn ? [0.5, 0.8, 1.3, 0.8, 1, 0.8, 0.7, 0.9] : [0.5, 0.8, 1.3, 0.8, 1, 0.8, 0.7];
+
     const pdfSections: PdfSection[] = [
       {
         title: "Clasificación general",
-        headers: ["#", "Dorsal", "Nombre completo", "Especial", "Categoría", "Distancia", "Tiempo"],
-        columnWeights: [0.5, 0.8, 1.3, 0.8, 1, 0.8, 0.7],
-        rows: rows.map((row) => [
-          row["Posición"],
-          row.Dorsal,
-          `${row.Nombre} ${row.Apellido}`.trim(),
-          row.Especial,
-          row["Categoría"],
-          String(row.Distancia).toUpperCase(),
-          row.Tiempo,
-        ]),
+        headers: generalHeaders,
+        columnWeights: generalWeights,
+        rows: rows.map((row) => {
+          const base = [
+            row["Posición"],
+            row.Dorsal,
+            `${row.Nombre} ${row.Apellido}`.trim(),
+            row.Especial,
+            row["Categoría"],
+            String(row.Distancia).toUpperCase(),
+            row.Tiempo,
+          ];
+          if (showTotalColumn) {
+            base.push((row as Record<string, string>)["Total acumulado"] ?? "-");
+          }
+          return base;
+        }),
       },
     ];
 
     if (specialFinishers.length > 0) {
       pdfSections.push({
         title: "Clasificación especial",
-        headers: ["#", "Dorsal", "Nombre", "Categoría", "Distancia", "Tiempo"],
-        columnWeights: [0.5, 0.8, 1.6, 1.1, 0.8, 0.7],
-        rows: specialFinishers.map((arrival, index) => [
-          index + 1,
-          arrival.displayBib,
-          `${arrival.name} ${arrival.surname}`,
-          arrival.categoryId ? categoriesMap[arrival.categoryId] || "Sin categoría" : "Sin categoría",
-          arrival.distance.toUpperCase(),
-          formatElapsedTime(arrival.finishTime - arrival.startTime),
-        ]),
+        headers: showTotalColumn
+          ? ["#", "Dorsal", "Nombre", "Categoría", "Distancia", "Tiempo", "Total"]
+          : ["#", "Dorsal", "Nombre", "Categoría", "Distancia", "Tiempo"],
+        columnWeights: showTotalColumn ? [0.5, 0.8, 1.4, 1, 0.7, 0.7, 0.9] : [0.5, 0.8, 1.6, 1.1, 0.8, 0.7],
+        rows: specialFinishers.map((arrival, index) => {
+          const base = [
+            index + 1,
+            arrival.displayBib,
+            `${arrival.name} ${arrival.surname}`,
+            arrival.categoryId ? categoriesMap[arrival.categoryId] || "Sin categoría" : "Sin categoría",
+            arrival.distance.toUpperCase(),
+            formatElapsedTime(getElapsedTime(arrival)),
+          ];
+          if (showTotalColumn) {
+            base.push(arrival.totalTime ? formatElapsedTime(arrival.totalTime) : "-");
+          }
+          return base;
+        }),
       });
     }
 
@@ -797,7 +956,7 @@ export function TimingDashboard({
           Nombre: `${arrival.name} ${arrival.surname}`,
           Especial: participantMapById[arrival.participantId]?.isSpecial ? "Sí" : "No",
           Distancia: arrival.distance,
-          Tiempo: formatElapsedTime(arrival.finishTime - arrival.startTime),
+          Tiempo: formatElapsedTime(getElapsedTime(arrival)),
         }));
         const worksheet = XLSX.utils.json_to_sheet(
           sheetRows.length > 0 ? sheetRows : [{ Aviso: "Sin llegadas registradas" }]
@@ -811,7 +970,7 @@ export function TimingDashboard({
             "Posición": index + 1,
             Dorsal: arrival.displayBib,
             Nombre: `${arrival.name} ${arrival.surname}`,
-            Tiempo: formatElapsedTime(arrival.finishTime - arrival.startTime),
+            Tiempo: formatElapsedTime(getElapsedTime(arrival)),
           }));
           const worksheet = XLSX.utils.json_to_sheet(
             sheetRows.length > 0 ? sheetRows : [{ Aviso: "Sin llegadas registradas" }]
@@ -839,7 +998,7 @@ export function TimingDashboard({
             arrival.displayBib,
             `${arrival.name} ${arrival.surname}`,
             participantMapById[arrival.participantId]?.isSpecial ? "Sí" : "No",
-            formatElapsedTime(arrival.finishTime - arrival.startTime),
+            formatElapsedTime(getElapsedTime(arrival)),
           ]),
         })),
         ...categorySpecialArrivals.map((category) => ({
@@ -850,7 +1009,7 @@ export function TimingDashboard({
             index + 1,
             arrival.displayBib,
             `${arrival.name} ${arrival.surname}`,
-            formatElapsedTime(arrival.finishTime - arrival.startTime),
+            formatElapsedTime(getElapsedTime(arrival)),
           ]),
         })),
       ]
@@ -875,7 +1034,7 @@ export function TimingDashboard({
           Especial: participantMapById[arrival.participantId]?.isSpecial ? "Sí" : "No",
           Categoría: arrival.categoryId ? categoriesMap[arrival.categoryId] ?? "Sin categoría" : "Sin categoría",
           Distancia: arrival.distance,
-          Tiempo: formatElapsedTime(arrival.finishTime - arrival.startTime),
+          Tiempo: formatElapsedTime(getElapsedTime(arrival)),
         }));
         const worksheet = XLSX.utils.json_to_sheet(
           sheetRows.length > 0 ? sheetRows : [{ Aviso: "Sin llegadas registradas" }]
@@ -891,7 +1050,7 @@ export function TimingDashboard({
             Nombre: `${arrival.name} ${arrival.surname}`,
             Categoría: arrival.categoryId ? categoriesMap[arrival.categoryId] ?? "Sin categoría" : "Sin categoría",
             Distancia: arrival.distance,
-            Tiempo: formatElapsedTime(arrival.finishTime - arrival.startTime),
+            Tiempo: formatElapsedTime(getElapsedTime(arrival)),
           }));
           const worksheet = XLSX.utils.json_to_sheet(
             sheetRows.length > 0 ? sheetRows : [{ Aviso: "Sin llegadas registradas" }]
@@ -917,7 +1076,7 @@ export function TimingDashboard({
             participantMapById[arrival.participantId]?.isSpecial ? "Sí" : "No",
             arrival.categoryId ? categoriesMap[arrival.categoryId] ?? "Sin categoría" : "Sin categoría",
             arrival.distance.toUpperCase(),
-            formatElapsedTime(arrival.finishTime - arrival.startTime),
+            formatElapsedTime(getElapsedTime(arrival)),
           ]),
         })),
         ...genderSpecialArrivals.map((genderGroup) => ({
@@ -930,7 +1089,7 @@ export function TimingDashboard({
             `${arrival.name} ${arrival.surname}`,
             arrival.categoryId ? categoriesMap[arrival.categoryId] ?? "Sin categoría" : "Sin categoría",
             arrival.distance.toUpperCase(),
-            formatElapsedTime(arrival.finishTime - arrival.startTime),
+            formatElapsedTime(getElapsedTime(arrival)),
           ]),
         })),
       ]
@@ -947,6 +1106,42 @@ export function TimingDashboard({
       <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
         Cronometrando: <span className="font-semibold text-foreground">{raceName}</span>
       </div>
+      {activeRace?.isMultiStage && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Instancia en medición</CardTitle>
+            <CardDescription>
+              Selecciona la etapa que estás midiendo. El total se calculará con las instancias marcadas
+              para sumar.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 md:grid-cols-[320px_1fr] md:items-center">
+            <div className="space-y-2">
+              <Label>Instancia actual</Label>
+              <Select value={activeInstanceId ?? ""} onValueChange={(value) => setActiveInstanceId(value)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecciona una instancia" />
+                </SelectTrigger>
+                <SelectContent>
+                  {raceInstances.map((instance) => (
+                    <SelectItem key={instance.id} value={instance.id}>
+                      {instance.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1 text-sm text-muted-foreground">
+              <p>
+                Instancia seleccionada: <span className="font-semibold text-foreground">{currentInstanceLabel}</span>
+              </p>
+              <p>
+                Instancias que suman al resultado: <span className="font-semibold text-foreground">{includedInstanceNames}</span>
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
       {isAdmin && (
       <Card>
         <CardHeader>
@@ -1131,6 +1326,7 @@ export function TimingDashboard({
                     <TableHead className="hidden md:table-cell">Categoría</TableHead>
                     <TableHead>Distancia</TableHead>
                     <TableHead>Tiempo</TableHead>
+                    {showTotalColumn && <TableHead>Total acumulado</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1155,8 +1351,13 @@ export function TimingDashboard({
                       </TableCell>
                       <TableCell>{arrival.distance}</TableCell>
                       <TableCell className="font-mono">
-                        {formatElapsedTime(arrival.finishTime - arrival.startTime)}
+                        {formatElapsedTime(getElapsedTime(arrival))}
                       </TableCell>
+                      {showTotalColumn && (
+                        <TableCell className="font-mono">
+                          {arrival.totalTime ? formatElapsedTime(arrival.totalTime) : "-"}
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -1223,7 +1424,7 @@ export function TimingDashboard({
                               )}
                             </TableCell>
                             <TableCell className="font-mono">
-                              {formatElapsedTime(arrival.finishTime - arrival.startTime)}
+                              {formatElapsedTime(getElapsedTime(arrival))}
                             </TableCell>
                           </TableRow>
                         ))}
@@ -1304,7 +1505,7 @@ export function TimingDashboard({
                             </TableCell>
                             <TableCell>{arrival.distance}</TableCell>
                             <TableCell className="font-mono">
-                              {formatElapsedTime(arrival.finishTime - arrival.startTime)}
+                              {formatElapsedTime(getElapsedTime(arrival))}
                             </TableCell>
                           </TableRow>
                         ))}
@@ -1374,7 +1575,7 @@ export function TimingDashboard({
                             </TableCell>
                             <TableCell>{arrival.distance}</TableCell>
                             <TableCell className="font-mono">
-                              {formatElapsedTime(arrival.finishTime - arrival.startTime)}
+                              {formatElapsedTime(getElapsedTime(arrival))}
                             </TableCell>
                           </TableRow>
                         ))}
@@ -1419,7 +1620,7 @@ export function TimingDashboard({
                                     <Badge variant="secondary">Especial</Badge>
                                   </TableCell>
                                   <TableCell className="font-mono">
-                                    {formatElapsedTime(arrival.finishTime - arrival.startTime)}
+                                    {formatElapsedTime(getElapsedTime(arrival))}
                                   </TableCell>
                                 </TableRow>
                               ))}
@@ -1477,7 +1678,7 @@ export function TimingDashboard({
                                   </TableCell>
                                   <TableCell>{arrival.distance}</TableCell>
                                   <TableCell className="font-mono">
-                                    {formatElapsedTime(arrival.finishTime - arrival.startTime)}
+                                    {formatElapsedTime(getElapsedTime(arrival))}
                                   </TableCell>
                                 </TableRow>
                               ))}
