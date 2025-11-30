@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { Loader2, ShieldCheck } from "lucide-react";
 import { loginWithEmail, loginWithGoogle, recordVisitor, registerWithEmail } from "@/lib/auth-client";
-import { toast } from "@/components/ui/use-toast";
+import { toast } from "@/hooks/use-toast";
 import { Toaster } from "@/components/ui/toaster";
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
