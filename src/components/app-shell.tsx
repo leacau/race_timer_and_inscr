@@ -19,8 +19,6 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { RaceTimerProLogo } from "./icons";
 import { Button } from "./ui/button";
-import { Label } from "./ui/label";
-import { Switch } from "./ui/switch";
 import { Separator } from "./ui/separator";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import { AppContext } from "@/context/app-context";
@@ -33,6 +31,7 @@ import {
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { Toaster } from "./ui/toaster";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 
 const navItems = [
   { href: "/", icon: LayoutGrid, label: "Dashboard" },
@@ -60,15 +59,19 @@ function AppHeader() {
       </div>
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2">
-          <Label htmlFor="role-switch" className="text-sm font-medium">
-            {role === "admin" ? "Administrador" : "Espectador"}
-          </Label>
-          <Switch
-            id="role-switch"
-            checked={role === "admin"}
-            onCheckedChange={(checked) => setRole(checked ? "admin" : "viewer")}
-            aria-label="Toggle admin mode"
-          />
+          <Select value={role} onValueChange={(value) => setRole(value as any)}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="Selecciona rol" />
+            </SelectTrigger>
+            <SelectContent align="end">
+              <SelectItem value="unassigned">Sin rol asignado</SelectItem>
+              <SelectItem value="admin">Administrador</SelectItem>
+              <SelectItem value="client">Cliente</SelectItem>
+              <SelectItem value="timer">Cronometrador</SelectItem>
+              <SelectItem value="kit">Entregador de kits</SelectItem>
+              <SelectItem value="visitor">Visitante</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         <Separator orientation="vertical" className="h-8" />
         <DropdownMenu>

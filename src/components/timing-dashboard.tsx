@@ -332,6 +332,8 @@ export function TimingDashboard({
   const { toast } = useToast();
   const { role } = useContext(AppContext);
   const isAdmin = role === "admin";
+  const isTimer = role === "timer";
+  const canControlTiming = isAdmin || isTimer;
   const [mode, setMode] = useState<TimingMode>("general");
   const [startingGroupKey, setStartingGroupKey] = useState<string | null>(null);
   const [manualBib, setManualBib] = useState("");
@@ -781,7 +783,7 @@ export function TimingDashboard({
   };
 
   const handleStartGroup = async (group: TimingGroup) => {
-    if (!isAdmin) return;
+    if (!canControlTiming) return;
     if (isRaceFinalized) {
       toast({
         variant: "destructive",
@@ -820,6 +822,7 @@ export function TimingDashboard({
   };
 
   const handleStopGroup = (group: TimingGroup) => {
+    if (!canControlTiming) return;
     if (!group.startTime) return;
     setStoppedGroups((prev) => ({
       ...prev,
@@ -828,6 +831,7 @@ export function TimingDashboard({
   };
 
   const handleResetGroup = async (group: TimingGroup) => {
+    if (!isAdmin) return;
     if (!group.startTime) return;
     const confirmReset = window.confirm(
       "Reseteará el cronómetro y limpiará las llegadas registradas para este grupo. ¿Deseas continuar?"
@@ -870,6 +874,7 @@ export function TimingDashboard({
 
   const handleManualCapture = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!canControlTiming) return;
     if (!manualBib.trim()) return;
     const bib = manualBib.trim();
     const participant = activeParticipants.find((p) => p.bibNumber === bib);
@@ -1370,7 +1375,7 @@ export function TimingDashboard({
         </Card>
       )}
 
-      {isAdmin && (
+      {canControlTiming && (
         <Card>
           <CardHeader>
             <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
@@ -1421,7 +1426,7 @@ export function TimingDashboard({
         </Card>
       )}
 
-      {isAdmin && (
+      {canControlTiming && (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {groups.length === 0 && (
             <div className="col-span-full text-center text-sm text-muted-foreground">
@@ -1452,13 +1457,21 @@ export function TimingDashboard({
                     : emptyTime}
                 </p>
               </div>
-              {isAdmin && (
+              {canControlTiming && (
                 <Button
                   onClick={() => {
                     if (!group.startTime) {
                       handleStartGroup(group);
                     } else if (stoppedGroups[group.key]) {
-                      handleResetGroup(group);
+                      if (isAdmin) {
+                        handleResetGroup(group);
+                      } else {
+                        setStoppedGroups((prev) => {
+                          const next = { ...prev };
+                          delete next[group.key];
+                          return next;
+                        });
+                      }
                     } else {
                       handleStopGroup(group);
                     }
@@ -1468,13 +1481,17 @@ export function TimingDashboard({
                     !group.startTime
                       ? "default"
                       : stoppedGroups[group.key]
-                      ? "destructive"
+                      ? isAdmin
+                        ? "destructive"
+                        : "secondary"
                       : "outline"
                   }
                 >
                   {group.startTime
                     ? stoppedGroups[group.key]
-                      ? "Resetear"
+                      ? isAdmin
+                        ? "Resetear"
+                        : "Reanudar"
                       : "Detener"
                     : "Iniciar"}
                 </Button>
@@ -1485,7 +1502,7 @@ export function TimingDashboard({
       </div>
       )}
 
-      {isAdmin && (
+      {canControlTiming && (
         <Card>
           <CardHeader>
             <CardTitle>Registro manual de llegadas</CardTitle>
@@ -1495,10 +1512,16 @@ export function TimingDashboard({
             <form onSubmit={handleManualCapture} className="flex flex-col gap-4 md:flex-row">
               <div className="flex-1 space-y-2">
                 <Label htmlFor="manual-bib">Número de dorsal</Label>
-                <Input id="manual-bib" value={manualBib} onChange={(event) => setManualBib(event.target.value)} placeholder="Ej: 152" />
+                <Input
+                  id="manual-bib"
+                  value={manualBib}
+                  onChange={(event) => setManualBib(event.target.value)}
+                  placeholder="Ej: 152"
+                  disabled={!canControlTiming}
+                />
               </div>
               <div className="flex items-end">
-                <Button type="submit" disabled={isSavingManual} className="w-full md:w-auto">
+                <Button type="submit" disabled={isSavingManual || !canControlTiming} className="w-full md:w-auto">
                   Registrar llegada
                 </Button>
               </div>

@@ -2,7 +2,7 @@
 
 import { createContext, useState, useMemo, type Dispatch, type SetStateAction } from "react";
 
-export type Role = "admin" | "viewer";
+export type Role = "admin" | "client" | "timer" | "kit" | "visitor" | "unassigned";
 export type AgeCalculationMethod = 'raceDay' | 'endOfYear';
 
 interface AppContextType {
@@ -15,7 +15,7 @@ interface AppContextType {
 }
 
 export const AppContext = createContext<AppContextType>({
-  role: "viewer",
+  role: "unassigned",
   setRole: () => {},
   raceDate: new Date(),
   setRaceDate: () => {},
@@ -24,7 +24,7 @@ export const AppContext = createContext<AppContextType>({
 });
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [role, setRole] = useState<Role>("viewer");
+  const [role, setRole] = useState<Role>("unassigned");
   const [raceDate, setRaceDate] = useState<Date>(new Date());
   const [ageCalculationMethod, setAgeCalculationMethod] = useState<AgeCalculationMethod>('raceDay');
 

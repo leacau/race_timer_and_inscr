@@ -848,6 +848,8 @@ export function CompetitorsManager({
   };
 
   const isAdmin = role === "admin";
+  const isClient = role === "client";
+  const canCreateIndividual = isAdmin || isClient;
 
   const toggleSelection = (id: string) => {
     const participant = participants.find((item) => item.id === id);
@@ -1130,7 +1132,7 @@ export function CompetitorsManager({
             />
             <p className="text-xs text-muted-foreground">Autobúsqueda desde el tercer caracter.</p>
           </div>
-          {activeRace?.competitionMode === "teams" && (
+          {activeRace?.competitionMode === "teams" && isAdmin && (
             <Card>
               <CardHeader>
                 <CardTitle>Equipos</CardTitle>
@@ -1173,11 +1175,13 @@ export function CompetitorsManager({
             </Card>
           )}
           <div className="flex flex-wrap items-center gap-2">
+            {canCreateIndividual && (
+              <Button onClick={() => handleOpenDialog()}>
+                <Plus className="mr-2 h-4 w-4" /> Añadir Participante
+              </Button>
+            )}
             {isAdmin && (
               <>
-                <Button onClick={() => handleOpenDialog()}>
-                  <Plus className="mr-2 h-4 w-4" /> Añadir Participante
-                </Button>
                 <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
                   <Upload className="mr-2 h-4 w-4" /> Importar
                 </Button>

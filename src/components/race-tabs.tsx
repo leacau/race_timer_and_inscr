@@ -27,8 +27,29 @@ export function RaceTabs({
 }) {
   const { role, setRaceDate, setAgeCalculationMethod } = useContext(AppContext);
   const isAdmin = role === "admin";
+  const isTimer = role === "timer";
+  const isClient = role === "client";
+  const isKit = role === "kit";
+  const isUnassigned = role === "unassigned";
 
-  const tabColumns = isAdmin ? "sm:grid-cols-4" : "sm:grid-cols-2";
+  const showTiming = !isKit && !isUnassigned;
+  const showCompetitors = isAdmin || isClient || isTimer;
+  const showKits = isAdmin || isKit;
+  const showCategories = isAdmin;
+
+  const visibleTabs = [
+    showTiming ? "timing" : null,
+    showCompetitors ? "competitors" : null,
+    showKits ? "kits" : null,
+    showCategories ? "categories" : null,
+  ].filter(Boolean) as string[];
+
+  const tabColumns = (() => {
+    const count = Math.max(visibleTabs.length, 2);
+    if (count >= 4) return "sm:grid-cols-4";
+    if (count === 3) return "sm:grid-cols-3";
+    return "sm:grid-cols-2";
+  })();
 
   useEffect(() => {
     if (race.eventDate) {
@@ -38,6 +59,8 @@ export function RaceTabs({
       setAgeCalculationMethod(race.ageCalculationMethod);
     }
   }, [race, setAgeCalculationMethod, setRaceDate]);
+
+  const defaultTab = visibleTabs[0] ?? "timing";
 
   return (
     <div className="space-y-4">
@@ -63,23 +86,27 @@ export function RaceTabs({
         </div>
       </div>
 
-      <Tabs defaultValue="timing" className="space-y-4">
+      <Tabs defaultValue={defaultTab} className="space-y-4">
         <TabsList className={`grid w-full grid-cols-2 ${tabColumns} sm:w-auto`}>
-          <TabsTrigger value="timing" className="flex items-center gap-2">
-            <TimerIcon className="h-4 w-4" />
-            {isAdmin ? "Cronometraje" : "Clasificación"}
-          </TabsTrigger>
-          <TabsTrigger value="competitors" className="flex items-center gap-2">
-            <UsersIcon className="h-4 w-4" />
-            {isAdmin ? "Competidores" : "Participantes"}
-          </TabsTrigger>
-          {isAdmin && (
+          {showTiming && (
+            <TabsTrigger value="timing" className="flex items-center gap-2">
+              <TimerIcon className="h-4 w-4" />
+              {isAdmin || isTimer ? "Cronometraje" : "Clasificación"}
+            </TabsTrigger>
+          )}
+          {showCompetitors && (
+            <TabsTrigger value="competitors" className="flex items-center gap-2">
+              <UsersIcon className="h-4 w-4" />
+              {isAdmin ? "Competidores" : "Participantes"}
+            </TabsTrigger>
+          )}
+          {showKits && (
             <TabsTrigger value="kits" className="flex items-center gap-2">
               <TruckIcon className="h-4 w-4" />
               Entrega de kits
             </TabsTrigger>
           )}
-          {isAdmin && (
+          {showCategories && (
             <TabsTrigger value="categories" className="flex items-center gap-2">
               <LayoutGridIcon className="h-4 w-4" />
               Categorías
@@ -87,33 +114,37 @@ export function RaceTabs({
           )}
         </TabsList>
 
-        <TabsContent value="timing" className="space-y-4">
-          <TimingDashboard
-            raceId={race.id}
-            activeRace={race}
-            participants={participants}
-            categories={categories}
-          />
-        </TabsContent>
+        {showTiming && (
+          <TabsContent value="timing" className="space-y-4">
+            <TimingDashboard
+              raceId={race.id}
+              activeRace={race}
+              participants={participants}
+              categories={categories}
+            />
+          </TabsContent>
+        )}
 
-        <TabsContent value="competitors" className="space-y-4">
-          <CompetitorsManager
-            participants={participants}
-            categories={categories}
-            raceId={race.id}
-            activeRace={race}
-            runnerChanges={runnerChanges}
-            teams={teams}
-          />
-        </TabsContent>
+        {showCompetitors && (
+          <TabsContent value="competitors" className="space-y-4">
+            <CompetitorsManager
+              participants={participants}
+              categories={categories}
+              raceId={race.id}
+              activeRace={race}
+              runnerChanges={runnerChanges}
+              teams={teams}
+            />
+          </TabsContent>
+        )}
 
-        {isAdmin && (
+        {showKits && (
           <TabsContent value="kits" className="space-y-4">
             <KitDelivery race={race} participants={participants} categories={categories} />
           </TabsContent>
         )}
 
-        {isAdmin && (
+        {showCategories && (
           <TabsContent value="categories" className="space-y-4">
             <CategoryManager initialCategories={categories} raceId={race.id} activeRace={race} />
           </TabsContent>
