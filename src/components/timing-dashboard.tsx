@@ -623,6 +623,25 @@ export function TimingDashboard({
     return lookup;
   }, [groups]);
 
+  const participantMapById = useMemo(() => {
+    return activeParticipants.reduce((acc, participant) => {
+      acc[participant.id] = participant;
+      return acc;
+    }, {} as Record<string, Participant>);
+  }, [activeParticipants]);
+
+  const getAggregatedValue = useCallback(
+    (participantId: string) => {
+      const participant = participantMapById[participantId];
+      if (!participant) return null;
+      if (participant.aggregatedType === "points" || participant.aggregatedType === "time") {
+        return participant.aggregatedValue ?? null;
+      }
+      return null;
+    },
+    [participantMapById]
+  );
+
   const finisherEntries = useMemo<ArrivalEntry[]>(() => {
     return activeParticipants
       .filter((participant) => participant.finishTime && participant.startTime)
@@ -667,25 +686,6 @@ export function TimingDashboard({
       return formatElapsedTime(value ?? 0);
     },
     [aggregationSelectionActive, getResultValue, isPointsAggregation]
-  );
-
-  const participantMapById = useMemo(() => {
-    return activeParticipants.reduce((acc, participant) => {
-      acc[participant.id] = participant;
-      return acc;
-    }, {} as Record<string, Participant>);
-  }, [activeParticipants]);
-
-  const getAggregatedValue = useCallback(
-    (participantId: string) => {
-      const participant = participantMapById[participantId];
-      if (!participant) return null;
-      if (participant.aggregatedType === "points" || participant.aggregatedType === "time") {
-        return participant.aggregatedValue ?? null;
-      }
-      return null;
-    },
-    [participantMapById]
   );
 
   const finishers = useMemo(() => {
