@@ -336,15 +336,15 @@ export function TimingDashboard({
   const [duplicateCounters, setDuplicateCounters] = useState<Record<string, number>>({});
   const raceName = activeRace?.name ?? "Carrera";
   const [viewerTab, setViewerTab] = useState<"general" | "categories" | "special">("general");
+  const [finalizedWindow, setFinalizedWindow] = useState<{ start: number | null; end: number | null }>(() => ({
+    start: activeRace?.raceStartTime ?? null,
+    end: activeRace?.raceEndTime ?? null,
+  }));
   const raceInstances = useMemo(() => activeRace?.instances ?? [], [activeRace]);
   const isRaceFinalized = useMemo(
     () => Boolean(activeRace?.finalized || activeRace?.raceEndTime || finalizedWindow.end),
     [activeRace?.finalized, activeRace?.raceEndTime, finalizedWindow.end]
   );
-  const [finalizedWindow, setFinalizedWindow] = useState<{ start: number | null; end: number | null }>(() => ({
-    start: activeRace?.raceStartTime ?? null,
-    end: activeRace?.raceEndTime ?? null,
-  }));
   const [activeInstanceId, setActiveInstanceId] = useState<string | null>(() =>
     activeRace?.isMultiStage ? raceInstances[0]?.id ?? null : null
   );
