@@ -184,6 +184,7 @@ export function CompetitorsManager({
 }) {
   const { toast } = useToast();
   const { role, raceDate, ageCalculationMethod } = useContext(AppContext);
+  const raceLockedForRole = useMemo(() => Boolean(activeRace?.finalized) && role !== "admin", [activeRace?.finalized, role]);
   const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
   const [editingParticipant, setEditingParticipant] = useState<Participant | null>(null);
@@ -347,6 +348,14 @@ export function CompetitorsManager({
   });
 
   const handleOpenDialog = (participant?: Participant) => {
+    if (raceLockedForRole) {
+      toast({
+        variant: "destructive",
+        title: "Carrera finalizada",
+        description: "Solo el administrador puede modificar participantes después del cierre.",
+      });
+      return;
+    }
     if (participant) {
       setEditingParticipant(participant);
       form.reset({
@@ -408,6 +417,14 @@ export function CompetitorsManager({
   };
 
   const onSubmit = async (values: ParticipantFormValues) => {
+    if (raceLockedForRole) {
+      toast({
+        variant: "destructive",
+        title: "Carrera finalizada",
+        description: "No puedes editar participantes en una carrera cerrada.",
+      });
+      return;
+    }
     try {
       if (!raceId) {
         toast({ variant: "destructive", title: "Selecciona una carrera", description: "Debes elegir una carrera para guardar competidores." });
@@ -443,6 +460,14 @@ export function CompetitorsManager({
   };
 
   const handleDelete = async (id: string, isReplaced?: boolean) => {
+    if (raceLockedForRole) {
+      toast({
+        variant: "destructive",
+        title: "Carrera finalizada",
+        description: "Solo el administrador puede borrar participantes después del cierre.",
+      });
+      return;
+    }
     if (isReplaced) {
       toast({
         variant: "destructive",
@@ -849,7 +874,7 @@ export function CompetitorsManager({
 
   const isAdmin = role === "admin";
   const isClient = role === "client";
-  const canCreateIndividual = isAdmin || isClient;
+  const canCreateIndividual = (isAdmin || isClient) && !raceLockedForRole;
 
   const toggleSelection = (id: string) => {
     const participant = participants.find((item) => item.id === id);

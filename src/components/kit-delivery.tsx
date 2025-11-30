@@ -58,13 +58,15 @@ type KitDeliveryProps = {
 };
 
 export function KitDelivery({ race, participants, categories }: KitDeliveryProps) {
-  const { raceDate, ageCalculationMethod, setRaceDate, setAgeCalculationMethod } = useContext(AppContext);
+  const { raceDate, ageCalculationMethod, setRaceDate, setAgeCalculationMethod, role } = useContext(AppContext);
   const { toast } = useToast();
   const [query, setQuery] = useState("");
   const [filtered, setFiltered] = useState<Participant[]>(participants);
   const [selected, setSelected] = useState<Participant | null>(null);
   const [isReplacementOpen, setIsReplacementOpen] = useState(false);
   const [localParticipants, setLocalParticipants] = useState<Participant[]>(participants);
+  const isAdmin = role === "admin";
+  const isRaceLocked = Boolean(race.finalized) && !isAdmin;
 
   useEffect(() => {
     if (race.eventDate) {
@@ -137,6 +139,14 @@ export function KitDelivery({ race, participants, categories }: KitDeliveryProps
   };
 
   const handleToggleDelivered = async (participant: Participant, delivered: boolean) => {
+    if (isRaceLocked) {
+      toast({
+        variant: "destructive",
+        title: "Carrera finalizada",
+        description: "No puedes registrar entregas en una carrera cerrada.",
+      });
+      return;
+    }
     if (participant.replacedById) {
       toast({
         variant: "destructive",
@@ -158,6 +168,14 @@ export function KitDelivery({ race, participants, categories }: KitDeliveryProps
   };
 
   const handleReplacementSubmit = form.handleSubmit(async (values) => {
+    if (isRaceLocked) {
+      toast({
+        variant: "destructive",
+        title: "Carrera finalizada",
+        description: "No puedes registrar cambios en una carrera cerrada.",
+      });
+      return;
+    }
     if (!selected) return;
     try {
       const { newParticipantId } = await replaceParticipant(
@@ -340,7 +358,7 @@ export function KitDelivery({ race, participants, categories }: KitDeliveryProps
                 <Switch
                   checked={Boolean(selected.kitDelivered)}
                   onCheckedChange={(checked) => handleToggleDelivered(selected, checked)}
-                  disabled={Boolean(selected.replacedById)}
+                  disabled={Boolean(selected.replacedById) || isRaceLocked}
                   aria-label="Kit entregado"
                 />
               </div>
@@ -349,7 +367,7 @@ export function KitDelivery({ race, participants, categories }: KitDeliveryProps
                 variant="secondary"
                 className="w-full"
                 onClick={() => setIsReplacementOpen(true)}
-                disabled={Boolean(selected.replacedById)}
+                disabled={Boolean(selected.replacedById) || isRaceLocked}
               >
                 <ArrowLeftRightIcon className="mr-2 h-4 w-4" /> Cambio de corredor
               </Button>

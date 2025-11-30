@@ -333,7 +333,6 @@ export function TimingDashboard({
   const { role } = useContext(AppContext);
   const isAdmin = role === "admin";
   const isTimer = role === "timer";
-  const canControlTiming = isAdmin || isTimer;
   const [mode, setMode] = useState<TimingMode>("general");
   const [startingGroupKey, setStartingGroupKey] = useState<string | null>(null);
   const [manualBib, setManualBib] = useState("");
@@ -357,6 +356,7 @@ export function TimingDashboard({
     () => Boolean(activeRace?.finalized || activeRace?.raceEndTime || finalizedWindow.end),
     [activeRace?.finalized, activeRace?.raceEndTime, finalizedWindow.end]
   );
+  const canControlTiming = useMemo(() => (isAdmin || isTimer) && !isRaceFinalized, [isAdmin, isTimer, isRaceFinalized]);
   const [activeInstanceId, setActiveInstanceId] = useState<string | null>(() =>
     activeRace?.isMultiStage ? raceInstances[0]?.id ?? null : null
   );
