@@ -91,15 +91,6 @@ function AppHeader() {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { role } = React.useContext(AppContext);
-  const [isClient, setIsClient] = React.useState(false);
-
-  React.useEffect(() => {
-    setIsClient(true);
-  }, []);
-
-  if (!isClient) {
-    return null; // or a loading skeleton
-  }
   
   const navItems = React.useMemo(() => {
     const items = [...baseNavItems];
