@@ -20,6 +20,13 @@ export type RaceInstance = {
   includeInResult: boolean;
 };
 
+export type RaceSession = {
+  id: string;
+  label?: string;
+  startTime: number;
+  endTime: number;
+};
+
 export type InstanceTime = {
   startTime: number | null;
   finishTime: number | null;
@@ -127,6 +134,13 @@ export type Race = {
   isMultiStage: boolean;
   includeInstancesInResult: boolean;
   instances: RaceInstance[];
+  raceStartTime?: number | null;
+  raceEndTime?: number | null;
+  finalized?: boolean;
+  sessions?: RaceSession[];
 };
 
-export type RaceInput = Omit<Race, 'id'>;
+export type RaceInput = Omit<
+  Race,
+  'id' | 'raceStartTime' | 'raceEndTime' | 'finalized' | 'sessions'
+>;

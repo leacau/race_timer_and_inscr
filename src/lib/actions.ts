@@ -14,6 +14,7 @@ import type {
   ParticipantFirestoreData,
   ParticipantInput,
   ParticipantSnapshot,
+  Race,
   RaceInput,
 } from "./types";
 
@@ -198,9 +199,10 @@ export async function updateParticipantTime(
   id: string,
   startTime: number,
   finishTime: number,
-  instanceId?: string | null
+  instanceId?: string | null,
+  nextInstanceId?: string | null
 ) {
-  await db.updateParticipantTime(id, startTime, finishTime, instanceId);
+  await db.updateParticipantTime(id, startTime, finishTime, instanceId, nextInstanceId);
   revalidatePath("/");
   revalidatePath("/competitors");
 }
@@ -786,4 +788,122 @@ export async function deleteRace(id: string) {
   revalidatePath("/competitors");
   revalidatePath("/categories");
   revalidatePath("/races");
+}
+
+export async function finalizeRaceTiming(raceId: string) {
+  const [race, participants] = await Promise.all([db.getRace(raceId), db.getParticipants(raceId)]);
+  const activeParticipants = participants.filter((participant) => !participant.replacedById);
+  const knownStarts = activeParticipants
+    .flatMap((participant) => {
+      const baseTimes: number[] = [];
+      if (participant.startTime) baseTimes.push(participant.startTime);
+      if (participant.instanceTimes) {
+        Object.values(participant.instanceTimes).forEach((instance) => {
+          if (instance?.startTime) baseTimes.push(instance.startTime);
+        });
+      }
+      return baseTimes;
+    })
+    .filter(Boolean) as number[];
+
+  const raceStartTime = race?.raceStartTime ?? (knownStarts.length > 0 ? Math.min(...knownStarts) : Date.now());
+  const raceEndTime = Date.now();
+  const sessions = Array.isArray(race?.sessions) ? [...race!.sessions] : [];
+  const sessionEntry: Race["sessions"][number] = {
+    id: `${raceEndTime}`,
+    label: `Final ${sessions.length + 1}`,
+    startTime: raceStartTime,
+    endTime: raceEndTime,
+  };
+
+  await db.updateRaceFields(raceId, {
+    raceStartTime,
+    raceEndTime,
+    finalized: true,
+    sessions: race?.timingAggregation === "multiple" ? [...sessions, sessionEntry] : sessions,
+  });
+
+  if (race?.isMultiStage && (race.instances?.length ?? 0) > 0) {
+    const includedInstances = race.includeInstancesInResult
+      ? (race.instances.some((instance) => instance.includeInResult)
+          ? race.instances.filter((instance) => instance.includeInResult)
+          : race.instances)
+      : race.instances.filter((instance) => instance.includeInResult);
+
+    if (includedInstances.length > 0) {
+      const instanceIds = includedInstances.map((instance) => instance.id);
+      const updates = activeParticipants
+        .map((participant) => {
+          const times = participant.instanceTimes ?? {};
+          let total = 0;
+          let earliest: number | null = participant.startTime ?? null;
+          for (const id of instanceIds) {
+            const record = times[id];
+            if (!record?.startTime || !record?.finishTime) return null;
+            if (earliest === null || record.startTime < earliest) {
+              earliest = record.startTime;
+            }
+            total += record.finishTime - record.startTime;
+          }
+          if (earliest === null) return null;
+          return {
+            id: participant.id,
+            data: {
+              startTime: earliest,
+              finishTime: earliest + total,
+            },
+          } as { id: string; data: Partial<ParticipantFirestoreData> };
+        })
+        .filter(Boolean) as { id: string; data: Partial<ParticipantFirestoreData> }[];
+
+      if (updates.length > 0) {
+        await db.bulkUpdateParticipants(updates);
+      }
+    }
+  }
+
+  revalidatePath("/");
+  revalidatePath(`/races/${raceId}`);
+  revalidatePath(`/kits/${raceId}`);
+
+  return { raceStartTime, raceEndTime };
+}
+
+export async function resetRaceTiming(raceId: string) {
+  const race = await db.getRace(raceId);
+  const participants = await db.getParticipants(raceId);
+  const instanceDefaults = (race?.instances ?? []).reduce(
+    (acc, instance) => {
+      acc[instance.id] = { startTime: null, finishTime: null };
+      return acc;
+    },
+    {} as Record<string, { startTime: null; finishTime: null }>
+  );
+
+  await db.bulkUpdateParticipants(
+    participants.map((participant) => ({
+      id: participant.id,
+      data: {
+        startTime: null,
+        finishTime: null,
+        instanceTimes:
+          Object.keys(participant.instanceTimes ?? {}).length > 0 || Object.keys(instanceDefaults).length > 0
+            ? instanceDefaults
+            : undefined,
+      },
+    }))
+  );
+
+  await db.updateRaceFields(raceId, {
+    raceStartTime: null,
+    raceEndTime: null,
+    finalized: false,
+    sessions: race?.timingAggregation === "multiple" ? [] : race?.sessions ?? [],
+  });
+
+  revalidatePath("/");
+  revalidatePath(`/races/${raceId}`);
+  revalidatePath(`/kits/${raceId}`);
+
+  return { cleared: participants.length };
 }

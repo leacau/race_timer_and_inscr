@@ -15,7 +15,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { AppContext } from "@/context/app-context";
 import { formatElapsedTime } from "@/lib/utils";
-import { resetTimingGroup, startTimingGroup, TimingMode, updateParticipantTime } from "@/lib/actions";
+import {
+  finalizeRaceTiming,
+  resetRaceTiming,
+  resetTimingGroup,
+  startTimingGroup,
+  TimingMode,
+  updateParticipantTime,
+} from "@/lib/actions";
 import { cn } from "@/lib/utils";
 import { Lock, Unlock } from "lucide-react";
 
@@ -330,6 +337,14 @@ export function TimingDashboard({
   const raceName = activeRace?.name ?? "Carrera";
   const [viewerTab, setViewerTab] = useState<"general" | "categories" | "special">("general");
   const raceInstances = useMemo(() => activeRace?.instances ?? [], [activeRace]);
+  const isRaceFinalized = useMemo(
+    () => Boolean(activeRace?.finalized || activeRace?.raceEndTime || finalizedWindow.end),
+    [activeRace?.finalized, activeRace?.raceEndTime, finalizedWindow.end]
+  );
+  const [finalizedWindow, setFinalizedWindow] = useState<{ start: number | null; end: number | null }>(() => ({
+    start: activeRace?.raceStartTime ?? null,
+    end: activeRace?.raceEndTime ?? null,
+  }));
   const [activeInstanceId, setActiveInstanceId] = useState<string | null>(() =>
     activeRace?.isMultiStage ? raceInstances[0]?.id ?? null : null
   );
@@ -351,6 +366,10 @@ export function TimingDashboard({
       return raceInstances[0]?.id ?? null;
     });
   }, [activeRace?.isMultiStage, raceInstances]);
+
+  useEffect(() => {
+    setFinalizedWindow({ start: activeRace?.raceStartTime ?? null, end: activeRace?.raceEndTime ?? null });
+  }, [activeRace?.raceEndTime, activeRace?.raceStartTime]);
 
   const categoriesMap = useMemo(() => {
     return categories.reduce((acc, category) => {
@@ -670,6 +689,14 @@ export function TimingDashboard({
 
   const handleStartGroup = async (group: TimingGroup) => {
     if (!isAdmin) return;
+    if (isRaceFinalized) {
+      toast({
+        variant: "destructive",
+        title: "Carrera finalizada",
+        description: "Resetea la carrera para volver a iniciar los cronómetros.",
+      });
+      return;
+    }
     if (
       group.startTime &&
       !stoppedGroups[group.key] &&
@@ -806,7 +833,15 @@ export function TimingDashboard({
         return;
       }
 
-      await updateParticipantTime(participant.id, effectiveStartTime, finishTime, activeInstanceId);
+      let nextInstanceId: string | null = null;
+      if (activeRace?.isMultiStage && activeInstanceId) {
+        const currentIndex = raceInstances.findIndex((instance) => instance.id === activeInstanceId);
+        if (currentIndex >= 0 && currentIndex < raceInstances.length - 1) {
+          nextInstanceId = raceInstances[currentIndex + 1]?.id ?? null;
+        }
+      }
+
+      await updateParticipantTime(participant.id, effectiveStartTime, finishTime, activeInstanceId, nextInstanceId);
       toast({
         title: "Tiempo registrado",
         description: `Se registró la llegada del dorsal ${bib}.`,
@@ -817,6 +852,58 @@ export function TimingDashboard({
       toast({ variant: "destructive", title: "Error", description: "No se pudo registrar el tiempo." });
     } finally {
       setIsSavingManual(false);
+    }
+  };
+
+  const clearLocalChronometers = useCallback(() => {
+    setStoppedGroups({});
+    if (typeof window !== "undefined") {
+      ["general", "distance", "category"].forEach((storedMode) => {
+        const key = `timing-paused:${raceId}:${storedMode}:${activeInstanceId ?? "single"}`;
+        localStorage.removeItem(key);
+      });
+    }
+  }, [activeInstanceId, raceId]);
+
+  const handleFinalizeRace = async () => {
+    if (!isAdmin) return;
+    const confirmFinish = window.confirm(
+      "Esto detendrá todos los cronómetros y guardará el horario de fin. Las clasificaciones y tiempos se mantendrán. ¿Deseas continuar?"
+    );
+    if (!confirmFinish) return;
+    try {
+      const result = await finalizeRaceTiming(raceId);
+      setFinalizedWindow({ start: result.raceStartTime ?? null, end: result.raceEndTime ?? null });
+      clearLocalChronometers();
+      toast({
+        title: "Carrera finalizada",
+        description: "Se detuvieron los cronómetros y se guardó la ventana total de la carrera.",
+      });
+    } catch (error) {
+      console.error(error);
+      toast({ variant: "destructive", title: "Error", description: "No se pudo finalizar la carrera." });
+    }
+  };
+
+  const handleResetRace = async () => {
+    if (!isAdmin) return;
+    const confirmReset = window.confirm(
+      "Esto borrará todas las llegadas, tiempos y reiniciará los cronómetros a 0. ¿Deseas continuar?"
+    );
+    if (!confirmReset) return;
+    try {
+      await resetRaceTiming(raceId);
+      clearLocalChronometers();
+      setDuplicateArrivals([]);
+      setDuplicateCounters({});
+      setFinalizedWindow({ start: null, end: null });
+      toast({
+        title: "Clasificaciones reseteadas",
+        description: "Se limpiaron tiempos, clasificaciones y cronómetros de la carrera.",
+      });
+    } catch (error) {
+      console.error(error);
+      toast({ variant: "destructive", title: "Error", description: "No se pudo resetear la carrera." });
     }
   };
 
@@ -1143,77 +1230,117 @@ export function TimingDashboard({
         </Card>
       )}
       {isAdmin && (
-      <Card>
-        <CardHeader>
-          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <CardTitle>Modo de largada</CardTitle>
-            {isAdmin && (
-              <Button
-                type="button"
-                variant={isLocked ? "default" : "outline"}
-                size="sm"
-                onClick={() => setIsLocked((value) => !value)}
-                className="flex items-center gap-2"
-              >
-                {isLocked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
-                <span className="text-xs font-semibold uppercase">
-                  {isLocked ? "Bloqueado" : "Desbloqueado"}
-                </span>
+        <Card>
+          <CardHeader>
+            <CardTitle>Finalizar o reiniciar la carrera</CardTitle>
+            <CardDescription>
+              Detén todos los cronómetros al terminar la prueba o reinicia los datos para comenzar de nuevo.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 md:grid-cols-2 md:items-center">
+            <div className="space-y-2 text-sm text-muted-foreground">
+              <p>
+                Inicio registrado: {finalizedWindow.start ? new Date(finalizedWindow.start).toLocaleString() : "-"}
+              </p>
+              <p>
+                Fin registrado: {finalizedWindow.end ? new Date(finalizedWindow.end).toLocaleString() : "-"}
+              </p>
+              {activeRace?.timingAggregation === "multiple" && (
+                <p>
+                  Al finalizar cada jornada podrás sumar tiempos o puntos de las instancias o días completados.
+                </p>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2 md:justify-end">
+              <Button variant="secondary" onClick={handleFinalizeRace} disabled={startingGroupKey !== null}>
+                Finalizar carrera
               </Button>
-            )}
-          </div>
-          <CardDescription>Elige cómo quieres administrar los cronómetros de la carrera.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <RadioGroup value={mode} onValueChange={(value) => setMode(value as TimingMode)} className="grid gap-4 md:grid-cols-3">
-            {modeOptions.map((option) => (
-              <Label
-                key={option.value}
-                htmlFor={`mode-${option.value}`}
-                className={cn(
-                  "flex cursor-pointer flex-col gap-2 rounded-md border p-4",
-                  mode === option.value ? "border-primary" : "border-muted"
-                )}
-              >
-                <RadioGroupItem value={option.value} id={`mode-${option.value}`} className="sr-only" />
-                <span className="text-sm font-medium">{option.label}</span>
-                <span className="text-sm text-muted-foreground">
-                  {option.value === "general" && "Un único disparo de largada para todos los participantes."}
-                  {option.value === "distance" && "Cada distancia tiene su propio cronómetro."}
-                  {option.value === "category" && "Cada categoría larga de manera independiente."}
-                </span>
-              </Label>
-            ))}
-          </RadioGroup>
-        </CardContent>
-      </Card>
+              <Button variant="destructive" onClick={handleResetRace} disabled={startingGroupKey !== null}>
+                Resetear datos y cronómetros
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {isAdmin && (
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {groups.length === 0 && (
-          <div className="col-span-full text-center text-sm text-muted-foreground">
-            Aún no hay participantes para cronometrar.
-          </div>
-        )}
-        {groups.map((group) => (
-          <Card key={group.key}>
-            <CardHeader>
-              <CardTitle className="text-base">{group.label}</CardTitle>
-              <CardDescription>
-                {group.participantCount} participantes · {group.finishedCount} llegados
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex items-center justify-between gap-4">
+        <Card>
+          <CardHeader>
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <CardTitle>Modo de largada</CardTitle>
+              {isAdmin && (
+                <Button
+                  type="button"
+                  variant={isLocked ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setIsLocked((value) => !value)}
+                  className="flex items-center gap-2"
+                >
+                  {isLocked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
+                  <span className="text-xs font-semibold uppercase">
+                    {isLocked ? "Bloqueado" : "Desbloqueado"}
+                  </span>
+                </Button>
+              )}
+            </div>
+            <CardDescription>Elige cómo quieres administrar los cronómetros de la carrera.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <RadioGroup
+              value={mode}
+              onValueChange={(value) => setMode(value as TimingMode)}
+              className="grid gap-4 md:grid-cols-3"
+            >
+              {modeOptions.map((option) => (
+                <Label
+                  key={option.value}
+                  htmlFor={`mode-${option.value}`}
+                  className={cn(
+                    "flex cursor-pointer flex-col gap-2 rounded-md border p-4",
+                    mode === option.value ? "border-primary" : "border-muted"
+                  )}
+                >
+                  <RadioGroupItem value={option.value} id={`mode-${option.value}`} className="sr-only" />
+                  <span className="text-sm font-medium">{option.label}</span>
+                  <span className="text-sm text-muted-foreground">
+                    {option.value === "general" && "Un único disparo de largada para todos los participantes."}
+                    {option.value === "distance" && "Cada distancia tiene su propio cronómetro."}
+                    {option.value === "category" && "Cada categoría larga de manera independiente."}
+                  </span>
+                </Label>
+              ))}
+            </RadioGroup>
+          </CardContent>
+        </Card>
+      )}
+
+      {isAdmin && (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {groups.length === 0 && (
+            <div className="col-span-full text-center text-sm text-muted-foreground">
+              Aún no hay participantes para cronometrar.
+            </div>
+          )}
+          {groups.map((group) => (
+            <Card key={group.key}>
+              <CardHeader>
+                <CardTitle className="text-base">{group.label}</CardTitle>
+                <CardDescription>
+                  {group.participantCount} participantes · {group.finishedCount} llegados
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex items-center justify-between gap-4">
               <div>
                 <p className="text-xs uppercase text-muted-foreground">Cronómetro</p>
                 <p className="font-mono text-3xl">
                   {group.startTime
                     ? formatElapsedTime(
-                        Math.max(
-                          0,
-                          (stoppedGroups[group.key]?.pausedAt ?? now) - group.startTime
-                        )
+                        isRaceFinalized
+                          ? 0
+                          : Math.max(
+                              0,
+                              (stoppedGroups[group.key]?.pausedAt ?? now) - group.startTime
+                            )
                       )
                     : emptyTime}
                 </p>
@@ -1229,7 +1356,7 @@ export function TimingDashboard({
                       handleStopGroup(group);
                     }
                   }}
-                  disabled={startingGroupKey === group.key || isLocked}
+                  disabled={startingGroupKey === group.key || isLocked || isRaceFinalized}
                   variant={
                     !group.startTime
                       ? "default"

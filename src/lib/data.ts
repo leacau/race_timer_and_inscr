@@ -39,6 +39,10 @@ const normalizeRace = (data: Omit<Race, "id">): Omit<Race, "id"> => ({
     isMultiStage: data.isMultiStage ?? false,
     includeInstancesInResult: data.includeInstancesInResult ?? false,
     instances: data.instances ?? [],
+    raceStartTime: data.raceStartTime ?? null,
+    raceEndTime: data.raceEndTime ?? null,
+    finalized: data.finalized ?? false,
+    sessions: data.sessions ?? [],
     name: data.name,
     eventDate: data.eventDate,
 });
@@ -121,7 +125,8 @@ export async function updateParticipantTime(
     id: string,
     startTime: number,
     finishTime: number,
-    instanceId?: string | null
+    instanceId?: string | null,
+    nextInstanceId?: string | null
 ): Promise<void> {
     const participantRef = doc(db, "participants", id);
     if (!instanceId) {
@@ -133,10 +138,21 @@ export async function updateParticipantTime(
     const data = snapshot.data() as ParticipantFirestoreData | undefined;
     const currentInstances = data?.instanceTimes ?? {};
     const current = currentInstances[instanceId] ?? { startTime: null, finishTime: null };
+    const nextInstance = nextInstanceId ? currentInstances[nextInstanceId] ?? { startTime: null, finishTime: null } : null;
+
     await updateDoc(participantRef, {
         instanceTimes: {
             ...currentInstances,
             [instanceId]: { ...current, startTime, finishTime },
+            ...(nextInstanceId
+                ? {
+                    [nextInstanceId]: {
+                        ...nextInstance,
+                        startTime: nextInstance?.startTime ?? finishTime,
+                        finishTime: nextInstance?.finishTime ?? null,
+                    },
+                }
+                : {}),
         },
     });
 }
@@ -211,7 +227,14 @@ export async function getRaces(): Promise<Race[]> {
 }
 
 export async function addRace(data: RaceInput): Promise<string> {
-    const docRef = await addDoc(collection(db, "races"), data);
+    const payload: Omit<Race, "id"> = {
+        ...data,
+        raceStartTime: null,
+        raceEndTime: null,
+        finalized: false,
+        sessions: [],
+    };
+    const docRef = await addDoc(collection(db, "races"), payload);
     return docRef.id;
 }
 
@@ -227,6 +250,11 @@ export async function getRace(id: string): Promise<Race | null> {
 }
 
 export async function updateRace(id: string, data: RaceInput): Promise<void> {
+    const raceRef = doc(db, "races", id);
+    await updateDoc(raceRef, data);
+}
+
+export async function updateRaceFields(id: string, data: Partial<Omit<Race, "id">>): Promise<void> {
     const raceRef = doc(db, "races", id);
     await updateDoc(raceRef, data);
 }
