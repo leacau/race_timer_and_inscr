@@ -364,9 +364,9 @@ export function CompetitorsManager({
       city: "",
       province: "",
       country: "",
-      shirtSize: "",
+      shirtSize: undefined,
       isSpecial: false,
-      teamId: "",
+      teamId: undefined,
     },
   });
 
@@ -386,10 +386,10 @@ export function CompetitorsManager({
         city: participant.city ?? "",
         province: participant.province ?? "",
         country: participant.country ?? "",
-        shirtSize: participant.shirtSize ?? "",
+        shirtSize: participant.shirtSize ?? undefined,
         birthDate: participant.birthDate ? new Date(participant.birthDate).toISOString().split("T")[0] : "",
         isSpecial: participant.isSpecial,
-        teamId: participant.teamId ?? "",
+        teamId: participant.teamId ?? undefined,
       });
     } else {
       setEditingParticipant(null);
@@ -404,9 +404,9 @@ export function CompetitorsManager({
         city: "",
         province: "",
         country: "",
-        shirtSize: "",
+        shirtSize: undefined,
         isSpecial: false,
-        teamId: "",
+        teamId: undefined,
       });
     }
     setOpen(true);
@@ -466,9 +466,9 @@ export function CompetitorsManager({
         city: values.city,
         province: values.province,
         country: values.country,
-        shirtSize: values.shirtSize || null,
+        shirtSize: values.shirtSize ?? null,
         isSpecial: values.isSpecial,
-        teamId: activeRace?.competitionMode === "teams" ? values.teamId || null : null,
+        teamId: activeRace?.competitionMode === "teams" ? values.teamId ?? null : null,
       };
 
       if (editingParticipant) {
@@ -1518,14 +1518,17 @@ export function CompetitorsManager({
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Talle de remera</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value ?? ""}>
+                    <Select
+                      onValueChange={(value) => field.onChange(value === "none" ? undefined : value)}
+                      value={field.value ?? "none"}
+                    >
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Selecciona un talle" />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="">Sin talle</SelectItem>
+                        <SelectItem value="none">Sin talle</SelectItem>
                         {SHIRT_SIZES.map((size) => (
                           <SelectItem key={size} value={size}>
                             {size}
@@ -1544,14 +1547,17 @@ export function CompetitorsManager({
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Equipo</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value ?? ""}>
+                      <Select
+                        onValueChange={(value) => field.onChange(value === "none" ? undefined : value)}
+                        value={field.value ?? "none"}
+                      >
                         <FormControl>
                           <SelectTrigger>
                             <SelectValue placeholder="Selecciona un equipo" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="">Sin equipo</SelectItem>
+                          <SelectItem value="none">Sin equipo</SelectItem>
                           {teams.map((team) => (
                             <SelectItem key={team.id} value={team.id}>
                               {team.name}
