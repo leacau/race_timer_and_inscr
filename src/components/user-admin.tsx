@@ -28,7 +28,7 @@ export function UserAdmin({ initialUsers }: { initialUsers: UserProfile[] }) {
   const isAdmin = role === "admin";
 
   const sortedUsers = useMemo(() => {
-    return [...users].sort((a, b) => a.email.localeCompare(b.email));
+    return [...users].sort((a, b) => (a.email ?? "").localeCompare(b.email ?? ""));
   }, [users]);
 
   const handleRoleChange = (userId: string, newRole: Role) => {
