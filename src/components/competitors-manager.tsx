@@ -47,7 +47,16 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Hash, MoreVertical, Edit, Trash2, Plus, Upload, Sparkles } from "lucide-react";
-import type { Participant, Category, ParticipantInput, Race, RunnerChange, Team } from "@/lib/types";
+import type {
+  Participant,
+  Category,
+  ParticipantInput,
+  Race,
+  RunnerChange,
+  Team,
+  ShirtSize,
+} from "@/lib/types";
+import { SHIRT_SIZES } from "@/lib/types";
 import { calculateAge, deriveBirthDateFromAge } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { AppContext } from "@/context/app-context";
@@ -82,6 +91,11 @@ const participantSchema = z.object({
   city: z.string().optional(),
   province: z.string().optional(),
   country: z.string().optional(),
+  shirtSize: z
+    .enum(SHIRT_SIZES as [ShirtSize, ...ShirtSize[]])
+    .optional()
+    .or(z.literal(""))
+    .nullable(),
   isSpecial: z.boolean().default(false),
   teamId: z.string().optional().nullable(),
 });
@@ -107,6 +121,7 @@ const systemFields = [
   { key: "city", label: "Ciudad", required: false },
   { key: "province", label: "Provincia", required: false },
   { key: "country", label: "País", required: false },
+  { key: "shirtSize", label: "Talle de remera", required: false },
   { key: "isSpecial", label: "Categoría especial", required: false },
 ] as const;
 
@@ -156,6 +171,7 @@ const importParticipantSchema = z
     city: z.string().optional(),
     province: z.string().optional(),
     country: z.string().optional(),
+    shirtSize: z.enum(SHIRT_SIZES as [ShirtSize, ...ShirtSize[]]).optional(),
     isSpecial: z.boolean().optional(),
   })
   .refine((data) => Boolean(data.birthDate) || typeof data.age === "number", {
@@ -342,6 +358,7 @@ export function CompetitorsManager({
       city: "",
       province: "",
       country: "",
+      shirtSize: "",
       isSpecial: false,
       teamId: "",
     },
@@ -363,6 +380,7 @@ export function CompetitorsManager({
         city: participant.city ?? "",
         province: participant.province ?? "",
         country: participant.country ?? "",
+        shirtSize: participant.shirtSize ?? "",
         birthDate: participant.birthDate ? new Date(participant.birthDate).toISOString().split("T")[0] : "",
         isSpecial: participant.isSpecial,
         teamId: participant.teamId ?? "",
@@ -380,6 +398,7 @@ export function CompetitorsManager({
         city: "",
         province: "",
         country: "",
+        shirtSize: "",
         isSpecial: false,
         teamId: "",
       });
@@ -441,6 +460,7 @@ export function CompetitorsManager({
         city: values.city,
         province: values.province,
         country: values.country,
+        shirtSize: values.shirtSize || null,
         isSpecial: values.isSpecial,
         teamId: activeRace?.competitionMode === "teams" ? values.teamId || null : null,
       };
@@ -825,6 +845,9 @@ export function CompetitorsManager({
           else if (distanceRaw.includes("21")) value = "21k";
           else if (distanceRaw.includes("10")) value = "10k";
           else value = "5k";
+        } else if (field.key === "shirtSize") {
+          const normalized = String(value).trim().toUpperCase();
+          value = SHIRT_SIZES.includes(normalized as ShirtSize) ? normalized : undefined;
         } else if (field.key === "dni") {
           value = String(value).replace(/[.-]/g, "").trim();
         } else {
@@ -1483,6 +1506,31 @@ export function CompetitorsManager({
                   )}
                 />
               </div>
+              <FormField
+                control={form.control}
+                name="shirtSize"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Talle de remera</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value ?? ""}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecciona un talle" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="">Sin talle</SelectItem>
+                        {SHIRT_SIZES.map((size) => (
+                          <SelectItem key={size} value={size}>
+                            {size}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
               {activeRace?.competitionMode === "teams" && (
                 <FormField
                   control={form.control}

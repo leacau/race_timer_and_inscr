@@ -63,17 +63,18 @@ export async function getParticipants(raceId?: string | null): Promise<Participa
         return {
             id: doc.id,
             ...data,
-        isSpecial: data.isSpecial ?? false,
-        kitDelivered: data.kitDelivered ?? false,
-        replacedFromId: data.replacedFromId ?? null,
-        replacedById: data.replacedById ?? null,
-        teamId: data.teamId ?? null,
-        instanceTimes: data.instanceTimes ?? {},
-        aggregatedType: data.aggregatedType ?? null,
-        aggregatedValue: data.aggregatedValue ?? null,
-        aggregatedInstanceIds: data.aggregatedInstanceIds ?? [],
-        aggregatedSessionIds: data.aggregatedSessionIds ?? [],
-    } satisfies Participant;
+            shirtSize: data.shirtSize ?? null,
+            isSpecial: data.isSpecial ?? false,
+            kitDelivered: data.kitDelivered ?? false,
+            replacedFromId: data.replacedFromId ?? null,
+            replacedById: data.replacedById ?? null,
+            teamId: data.teamId ?? null,
+            instanceTimes: data.instanceTimes ?? {},
+            aggregatedType: data.aggregatedType ?? null,
+            aggregatedValue: data.aggregatedValue ?? null,
+            aggregatedInstanceIds: data.aggregatedInstanceIds ?? [],
+            aggregatedSessionIds: data.aggregatedSessionIds ?? [],
+        } satisfies Participant;
   });
 
     if (raceId) {
@@ -117,6 +118,7 @@ export async function getParticipant(id: string): Promise<Participant | null> {
     return {
         id: snapshot.id,
         ...data,
+        shirtSize: data.shirtSize ?? null,
         isSpecial: data.isSpecial ?? false,
         kitDelivered: data.kitDelivered ?? false,
         replacedFromId: data.replacedFromId ?? null,

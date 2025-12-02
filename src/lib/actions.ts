@@ -59,6 +59,7 @@ export async function addParticipant(
     city: participantData.city || null,
     province: participantData.province || null,
     country: participantData.country || null,
+    shirtSize: participantData.shirtSize || null,
     isSpecial: Boolean(participantData.isSpecial),
     categoryId,
     chipNumber,
@@ -94,6 +95,7 @@ export async function updateParticipant(
     city: participantData.city || null,
     province: participantData.province || null,
     country: participantData.country || null,
+    shirtSize: participantData.shirtSize || null,
     teamId: participantData.teamId || null,
   };
 
@@ -155,6 +157,7 @@ export async function replaceParticipant(
     city: replacement.city || null,
     province: replacement.province || null,
     country: replacement.country || null,
+    shirtSize: replacement.shirtSize || original.shirtSize || null,
     teamId: replacement.teamId || original.teamId || null,
     kitDelivered: original.kitDelivered ?? false,
     replacedFromId: original.id,

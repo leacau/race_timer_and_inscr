@@ -40,6 +40,9 @@ export type Team = {
   name: string;
 };
 
+export const SHIRT_SIZES = ["XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"] as const;
+export type ShirtSize = (typeof SHIRT_SIZES)[number];
+
 // Tipo de Participante como se lee de Firestore
 export type Participant = {
   id: string;
@@ -58,6 +61,7 @@ export type Participant = {
   city: string | null;
   province: string | null;
   country: string | null;
+  shirtSize?: ShirtSize | null;
   isSpecial: boolean;
   kitDelivered?: boolean;
   replacedFromId?: string | null;
@@ -82,6 +86,7 @@ export type ParticipantInput = {
   city?: string;
   province?: string;
   country?: string;
+  shirtSize?: ShirtSize | null;
   isSpecial?: boolean;
   teamId?: string | null;
 };
