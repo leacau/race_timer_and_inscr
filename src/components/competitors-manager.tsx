@@ -754,6 +754,26 @@ export function CompetitorsManager({
       if (h) headerIndexMap[h] = i;
     });
 
+    const missingRequiredFields = systemFields
+      .filter((field) => field.required)
+      .filter((field) => {
+        const mappedHeader = mappings[field.key];
+        if (!mappedHeader || mappedHeader === "--ignore--") return true;
+        return headerIndexMap[mappedHeader] === undefined;
+      });
+
+    if (missingRequiredFields.length > 0) {
+      toast({
+        variant: "destructive",
+        title: "Campos obligatorios sin asignar",
+        description: `Mapea los campos requeridos antes de importar: ${missingRequiredFields
+          .map((field) => field.label)
+          .join(", ")}.`,
+        duration: 9000,
+      });
+      return;
+    }
+
     const validParticipants: ParticipantInput[] = [];
     const validationErrors: { row: number; error: any; data: any }[] = [];
 
