@@ -51,11 +51,13 @@ export async function addParticipant(
 ) {
   const categories = await db.getCategories(raceId);
   const categoryId = assignCategory(participantData, categories, raceDate, ageCalculationMethod);
-  const chipNumber = generateChipNumber(participantData.bibNumber);
+  const bibNumber = participantData.bibNumber ?? "";
+  const chipNumber = generateChipNumber(bibNumber);
 
   const participantToSave: ParticipantFirestoreData = {
     raceId,
     ...participantData,
+    bibNumber,
     city: participantData.city || null,
     province: participantData.province || null,
     country: participantData.country || null,
@@ -85,10 +87,12 @@ export async function updateParticipant(
 ) {
   const categories = await db.getCategories(raceId);
   const categoryId = assignCategory(participantData, categories, raceDate, ageCalculationMethod);
-  const chipNumber = generateChipNumber(participantData.bibNumber);
+  const bibNumber = participantData.bibNumber ?? "";
+  const chipNumber = generateChipNumber(bibNumber);
 
   const dataToUpdate: Partial<ParticipantFirestoreData> = {
     ...participantData,
+    bibNumber,
     isSpecial: Boolean(participantData.isSpecial),
     categoryId,
     chipNumber,

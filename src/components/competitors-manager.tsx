@@ -81,7 +81,10 @@ import Link from "next/link";
 
 const participantSchema = z.object({
   id: z.string().optional(),
-  bibNumber: z.string().min(1, "El dorsal es requerido"),
+  bibNumber: z
+    .string()
+    .optional()
+    .transform((value) => (value ?? "").trim()),
   name: z.string().min(1, "El nombre es requerido"),
   surname: z.string().min(1, "El apellido es requerido"),
   dni: z.string().min(1, "El DNI/ID es requerido"),
@@ -110,7 +113,7 @@ type ImportState = {
 };
 
 const systemFields = [
-  { key: "bibNumber", label: "Dorsal", required: true },
+  { key: "bibNumber", label: "Dorsal", required: false },
   { key: "name", label: "Nombre", required: true },
   { key: "surname", label: "Apellido", required: true },
   { key: "dni", label: "DNI/ID", required: true },
@@ -142,7 +145,10 @@ const isPairedField = (key: string): key is (typeof pairedFields)[number] =>
 
 const importParticipantSchema = z
   .object({
-    bibNumber: z.string().min(1, { message: "El dorsal es requerido." }),
+    bibNumber: z
+      .string()
+      .optional()
+      .transform((value) => (value ?? "").toString().trim()),
     name: z.string().min(1, { message: "El nombre es requerido." }),
     surname: z.string().min(1, { message: "El apellido es requerido." }),
     dni: z.string().min(1, { message: "El DNI/ID es requerido." }),

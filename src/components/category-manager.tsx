@@ -507,7 +507,7 @@ export function CategoryManager({
       </Dialog>
       
       <Dialog open={openBulk} onOpenChange={setOpenBulk}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-lg max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Creador Masivo de Categorías</DialogTitle>
             <DialogDescription>
