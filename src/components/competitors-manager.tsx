@@ -46,8 +46,17 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { MoreVertical, Edit, Trash2, Plus, Upload, Sparkles } from "lucide-react";
-import type { Participant, Category, ParticipantInput, Race } from "@/lib/types";
+import { Hash, MoreVertical, Edit, Trash2, Plus, Upload, Sparkles } from "lucide-react";
+import type {
+  Participant,
+  Category,
+  ParticipantInput,
+  Race,
+  RunnerChange,
+  Team,
+  ShirtSize,
+} from "@/lib/types";
+import { SHIRT_SIZES } from "@/lib/types";
 import { calculateAge, deriveBirthDateFromAge } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { AppContext } from "@/context/app-context";
@@ -61,6 +70,9 @@ import {
   importParticipants,
   bulkDeleteParticipants,
   assignCategoriesToParticipants,
+  assignBibNumbers,
+  addTeamToRace,
+  removeTeam,
 } from "@/lib/actions";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -69,7 +81,10 @@ import Link from "next/link";
 
 const participantSchema = z.object({
   id: z.string().optional(),
-  bibNumber: z.string().min(1, "El dorsal es requerido"),
+  bibNumber: z
+    .string()
+    .optional()
+    .transform((value) => (value ?? "").trim()),
   name: z.string().min(1, "El nombre es requerido"),
   surname: z.string().min(1, "El apellido es requerido"),
   dni: z.string().min(1, "El DNI/ID es requerido"),
@@ -79,7 +94,13 @@ const participantSchema = z.object({
   city: z.string().optional(),
   province: z.string().optional(),
   country: z.string().optional(),
+  shirtSize: z
+    .enum(SHIRT_SIZES as [ShirtSize, ...ShirtSize[]])
+    .optional()
+    .or(z.literal(""))
+    .nullable(),
   isSpecial: z.boolean().default(false),
+  teamId: z.string().optional().nullable(),
 });
 
 type ParticipantFormValues = z.infer<typeof participantSchema>;
@@ -92,7 +113,7 @@ type ImportState = {
 };
 
 const systemFields = [
-  { key: "bibNumber", label: "Dorsal", required: true },
+  { key: "bibNumber", label: "Dorsal", required: false },
   { key: "name", label: "Nombre", required: true },
   { key: "surname", label: "Apellido", required: true },
   { key: "dni", label: "DNI/ID", required: true },
@@ -103,6 +124,7 @@ const systemFields = [
   { key: "city", label: "Ciudad", required: false },
   { key: "province", label: "Provincia", required: false },
   { key: "country", label: "País", required: false },
+  { key: "shirtSize", label: "Talle de remera", required: false },
   { key: "isSpecial", label: "Categoría especial", required: false },
 ] as const;
 
@@ -123,7 +145,10 @@ const isPairedField = (key: string): key is (typeof pairedFields)[number] =>
 
 const importParticipantSchema = z
   .object({
-    bibNumber: z.string().min(1, { message: "El dorsal es requerido." }),
+    bibNumber: z
+      .string()
+      .optional()
+      .transform((value) => (value ?? "").toString().trim()),
     name: z.string().min(1, { message: "El nombre es requerido." }),
     surname: z.string().min(1, { message: "El apellido es requerido." }),
     dni: z.string().min(1, { message: "El DNI/ID es requerido." }),
@@ -152,6 +177,7 @@ const importParticipantSchema = z
     city: z.string().optional(),
     province: z.string().optional(),
     country: z.string().optional(),
+    shirtSize: z.enum(SHIRT_SIZES as [ShirtSize, ...ShirtSize[]]).optional(),
     isSpecial: z.boolean().optional(),
   })
   .refine((data) => Boolean(data.birthDate) || typeof data.age === "number", {
@@ -168,14 +194,19 @@ export function CompetitorsManager({
   categories,
   raceId,
   activeRace,
+  runnerChanges = [],
+  teams = [],
 }: {
   participants: Participant[];
   categories: Category[];
   raceId: string | null;
   activeRace?: Race | null;
+  runnerChanges?: RunnerChange[];
+  teams?: Team[];
 }) {
   const { toast } = useToast();
   const { role, raceDate, ageCalculationMethod } = useContext(AppContext);
+  const raceLockedForRole = useMemo(() => Boolean(activeRace?.finalized) && role !== "admin", [activeRace?.finalized, role]);
   const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
   const [editingParticipant, setEditingParticipant] = useState<Participant | null>(null);
@@ -196,6 +227,23 @@ export function CompetitorsManager({
     distance: "5k",
   });
   const [isAssigning, setIsAssigning] = useState(false);
+  const [isBibDialogOpen, setIsBibDialogOpen] = useState(false);
+  const [bibTab, setBibTab] = useState<"single" | "bulk">("single");
+  const [singleBibParticipantId, setSingleBibParticipantId] = useState<string>("");
+  const [singleBibNumber, setSingleBibNumber] = useState<string>("");
+  const [bulkBibRange, setBulkBibRange] = useState<{ from: string; to: string }>({ from: "", to: "" });
+  const [bulkBibDistance, setBulkBibDistance] = useState<Participant["distance"] | "all">("all");
+  const [bulkBibGender, setBulkBibGender] = useState<Participant["gender"] | "any">("any");
+  const [bulkBibMinAge, setBulkBibMinAge] = useState<string>("");
+  const [bulkBibMaxAge, setBulkBibMaxAge] = useState<string>("");
+  const [includeAssignedBibs, setIncludeAssignedBibs] = useState(false);
+  const [isAssigningBibs, setIsAssigningBibs] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [dniQuery, setDniQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<Participant[]>([]);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [participantTab, setParticipantTab] = useState<"list" | "changes">("list");
+  const [newTeamName, setNewTeamName] = useState("");
 
   const categoryMap = useMemo(() => {
     return categories.reduce((acc, category) => {
@@ -203,6 +251,13 @@ export function CompetitorsManager({
       return acc;
     }, {} as Record<string, string>);
   }, [categories]);
+
+  const teamMap = useMemo(() => {
+    return teams.reduce((acc, team) => {
+      acc[team.id] = team.name;
+      return acc;
+    }, {} as Record<string, string>);
+  }, [teams]);
 
   if (!raceId) {
     return (
@@ -231,11 +286,53 @@ export function CompetitorsManager({
     return [...categories].sort((a, b) => a.name.localeCompare(b.name));
   }, [categories]);
 
+  const filteredParticipants = useMemo(() => {
+    const term = searchQuery.trim().toLowerCase();
+    if (term.length < 3) return participants;
+    return participants.filter((participant) => {
+      return (
+        participant.dni.toLowerCase().includes(term) ||
+        participant.surname.toLowerCase().includes(term) ||
+        participant.name.toLowerCase().includes(term)
+      );
+    });
+  }, [participants, searchQuery]);
+
+  const selectableParticipants = useMemo(
+    () => filteredParticipants.filter((participant) => !participant.replacedById),
+    [filteredParticipants]
+  );
+
+  const teamCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    selectableParticipants.forEach((participant) => {
+      if (participant.teamId) {
+        counts[participant.teamId] = (counts[participant.teamId] || 0) + 1;
+      }
+    });
+    return counts;
+  }, [selectableParticipants]);
+
+  const handleViewerSearch = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const normalized = dniQuery.trim();
+    setHasSearched(true);
+    if (!normalized) {
+      setSearchResults([]);
+      return;
+    }
+    const matches = participants.filter(
+      (participant) =>
+        !participant.replacedById && (participant.dni ?? "").trim().toLowerCase() === normalized.toLowerCase()
+    );
+    setSearchResults(matches);
+  };
+
   useEffect(() => {
     setSelectedParticipants((prev) => {
       const next = new Set<string>();
       participants.forEach((participant) => {
-        if (prev.has(participant.id)) {
+        if (prev.has(participant.id) && !participant.replacedById) {
           next.add(participant.id);
         }
       });
@@ -267,17 +364,32 @@ export function CompetitorsManager({
       city: "",
       province: "",
       country: "",
+      shirtSize: undefined,
       isSpecial: false,
+      teamId: undefined,
     },
   });
 
   const handleOpenDialog = (participant?: Participant) => {
+    if (raceLockedForRole) {
+      toast({
+        variant: "destructive",
+        title: "Carrera finalizada",
+        description: "Solo el administrador puede modificar participantes después del cierre.",
+      });
+      return;
+    }
     if (participant) {
       setEditingParticipant(participant);
       form.reset({
         ...participant,
+        city: participant.city ?? "",
+        province: participant.province ?? "",
+        country: participant.country ?? "",
+        shirtSize: participant.shirtSize ?? undefined,
         birthDate: participant.birthDate ? new Date(participant.birthDate).toISOString().split("T")[0] : "",
         isSpecial: participant.isSpecial,
+        teamId: participant.teamId ?? undefined,
       });
     } else {
       setEditingParticipant(null);
@@ -292,13 +404,52 @@ export function CompetitorsManager({
         city: "",
         province: "",
         country: "",
+        shirtSize: undefined,
         isSpecial: false,
+        teamId: undefined,
       });
     }
     setOpen(true);
   };
 
+  const handleAddTeam = async () => {
+    if (!raceId) return;
+    const normalized = newTeamName.trim();
+    if (!normalized) {
+      toast({ variant: "destructive", title: "Nombre requerido", description: "Ingresa un nombre para el equipo." });
+      return;
+    }
+    try {
+      await addTeamToRace(raceId, normalized);
+      setNewTeamName("");
+      toast({ title: "Equipo creado", description: "Ahora puedes asignar participantes al equipo." });
+    } catch (error) {
+      console.error(error);
+      toast({ variant: "destructive", title: "Error", description: "No se pudo crear el equipo." });
+    }
+  };
+
+  const handleDeleteTeam = async (teamId: string) => {
+    if (!raceId) return;
+    if (!window.confirm("¿Eliminar este equipo?")) return;
+    try {
+      await removeTeam(raceId, teamId);
+      toast({ title: "Equipo eliminado", description: "Se quitaron los datos del equipo." });
+    } catch (error) {
+      console.error(error);
+      toast({ variant: "destructive", title: "Error", description: "No se pudo eliminar el equipo." });
+    }
+  };
+
   const onSubmit = async (values: ParticipantFormValues) => {
+    if (raceLockedForRole) {
+      toast({
+        variant: "destructive",
+        title: "Carrera finalizada",
+        description: "No puedes editar participantes en una carrera cerrada.",
+      });
+      return;
+    }
     try {
       if (!raceId) {
         toast({ variant: "destructive", title: "Selecciona una carrera", description: "Debes elegir una carrera para guardar competidores." });
@@ -315,7 +466,9 @@ export function CompetitorsManager({
         city: values.city,
         province: values.province,
         country: values.country,
+        shirtSize: values.shirtSize ?? null,
         isSpecial: values.isSpecial,
+        teamId: activeRace?.competitionMode === "teams" ? values.teamId ?? null : null,
       };
 
       if (editingParticipant) {
@@ -332,7 +485,23 @@ export function CompetitorsManager({
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (id: string, isReplaced?: boolean) => {
+    if (raceLockedForRole) {
+      toast({
+        variant: "destructive",
+        title: "Carrera finalizada",
+        description: "Solo el administrador puede borrar participantes después del cierre.",
+      });
+      return;
+    }
+    if (isReplaced) {
+      toast({
+        variant: "destructive",
+        title: "Acción no permitida",
+        description: "No puedes modificar un participante que ya fue reemplazado.",
+      });
+      return;
+    }
     try {
       await deleteParticipant(id);
       toast({ title: "Participante Eliminado", description: "El participante ha sido eliminado correctamente." });
@@ -443,6 +612,94 @@ export function CompetitorsManager({
     }
   };
 
+  const handleOpenBibDialog = () => {
+    const firstSelected = Array.from(selectedParticipants)[0];
+    setSingleBibParticipantId(firstSelected || "");
+    const candidate = participants.find((p) => p.id === firstSelected);
+    setSingleBibNumber(candidate?.bibNumber ?? "");
+    setIsBibDialogOpen(true);
+  };
+
+  const handleBibAssignmentSubmit = async () => {
+    try {
+      if (!raceId) {
+        toast({ variant: "destructive", title: "Selecciona una carrera", description: "Necesitas una carrera activa para asignar dorsales." });
+        return;
+      }
+      setIsAssigningBibs(true);
+
+      if (bibTab === "single") {
+        if (!singleBibParticipantId) {
+          toast({ variant: "destructive", title: "Selecciona un participante", description: "Elige a quién asignar el dorsal." });
+          return;
+        }
+        if (!singleBibNumber.trim()) {
+          toast({ variant: "destructive", title: "Dorsal requerido", description: "Indica el número de dorsal." });
+          return;
+        }
+
+        await assignBibNumbers(
+          { mode: "single", participantId: singleBibParticipantId, bibNumber: singleBibNumber.trim() },
+          raceDate,
+          ageCalculationMethod,
+          raceId
+        );
+        toast({ title: "Dorsal actualizado", description: "Se guardó el dorsal y el chip del participante." });
+      } else {
+        if (!bulkBibRange.from.trim() || !bulkBibRange.to.trim()) {
+          toast({ variant: "destructive", title: "Rango requerido", description: "Completa el dorsal inicial y final." });
+          return;
+        }
+
+        const minAge = bulkBibMinAge ? Number(bulkBibMinAge) : undefined;
+        const maxAge = bulkBibMaxAge ? Number(bulkBibMaxAge) : undefined;
+
+        if ((bulkBibMinAge && Number.isNaN(minAge)) || (bulkBibMaxAge && Number.isNaN(maxAge))) {
+          toast({ variant: "destructive", title: "Edad inválida", description: "Las edades mínima y máxima deben ser numéricas." });
+          return;
+        }
+
+        if (typeof minAge === "number" && typeof maxAge === "number" && minAge > maxAge) {
+          toast({ variant: "destructive", title: "Rango de edad inválido", description: "La edad mínima no puede superar a la máxima." });
+          return;
+        }
+
+        const result = await assignBibNumbers(
+          {
+            mode: "bulk",
+            fromBib: bulkBibRange.from.trim(),
+            toBib: bulkBibRange.to.trim(),
+            includeAssigned: includeAssignedBibs,
+            filters: {
+              distance: bulkBibDistance === "all" ? undefined : bulkBibDistance,
+              gender: bulkBibGender === "any" ? undefined : bulkBibGender,
+              minAge,
+              maxAge,
+            },
+          },
+          raceDate,
+          ageCalculationMethod,
+          raceId
+        );
+
+        toast({
+          title: "Dorsales asignados",
+          description:
+            result.updated === 0
+              ? "No se encontraron participantes que cumplan los filtros."
+              : `Se actualizaron ${result.updated} participante(s).`,
+        });
+      }
+
+      setIsBibDialogOpen(false);
+    } catch (error) {
+      console.error(error);
+      toast({ variant: "destructive", title: "Error", description: error instanceof Error ? error.message : "No se pudieron asignar los dorsales." });
+    } finally {
+      setIsAssigningBibs(false);
+    }
+  };
+
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -523,6 +780,26 @@ export function CompetitorsManager({
       if (h) headerIndexMap[h] = i;
     });
 
+    const missingRequiredFields = systemFields
+      .filter((field) => field.required)
+      .filter((field) => {
+        const mappedHeader = mappings[field.key];
+        if (!mappedHeader || mappedHeader === "--ignore--") return true;
+        return headerIndexMap[mappedHeader] === undefined;
+      });
+
+    if (missingRequiredFields.length > 0) {
+      toast({
+        variant: "destructive",
+        title: "Campos obligatorios sin asignar",
+        description: `Mapea los campos requeridos antes de importar: ${missingRequiredFields
+          .map((field) => field.label)
+          .join(", ")}.`,
+        duration: 9000,
+      });
+      return;
+    }
+
     const validParticipants: ParticipantInput[] = [];
     const validationErrors: { row: number; error: any; data: any }[] = [];
 
@@ -574,6 +851,9 @@ export function CompetitorsManager({
           else if (distanceRaw.includes("21")) value = "21k";
           else if (distanceRaw.includes("10")) value = "10k";
           else value = "5k";
+        } else if (field.key === "shirtSize") {
+          const normalized = String(value).trim().toUpperCase();
+          value = SHIRT_SIZES.includes(normalized as ShirtSize) ? normalized : undefined;
         } else if (field.key === "dni") {
           value = String(value).replace(/[.-]/g, "").trim();
         } else {
@@ -642,8 +922,12 @@ export function CompetitorsManager({
   };
 
   const isAdmin = role === "admin";
+  const isClient = role === "client";
+  const canCreateIndividual = (isAdmin || isClient) && !raceLockedForRole;
 
   const toggleSelection = (id: string) => {
+    const participant = participants.find((item) => item.id === id);
+    if (!participant || participant.replacedById) return;
     setSelectedParticipants((prev) => {
       const next = new Set(prev);
       if (next.has(id)) {
@@ -660,26 +944,43 @@ export function CompetitorsManager({
       setSelectedParticipants(new Set());
       return;
     }
-    setSelectedParticipants(new Set(participants.map((p) => p.id)));
+    setSelectedParticipants(new Set(selectableParticipants.map((p) => p.id)));
   };
 
   const selectedCount = selectedParticipants.size;
+  const allVisibleSelected =
+    selectableParticipants.length > 0 &&
+    selectableParticipants.every((participant) => selectedParticipants.has(participant.id));
 
   const renderParticipantRow = (p: Participant) => {
     const age = calculateAge(p.birthDate, raceDate, ageCalculationMethod);
     const isSelected = selectedParticipants.has(p.id);
+    const isReplaced = Boolean(p.replacedById);
     return (
-      <TableRow key={p.id} data-selected={isSelected}>
+      <TableRow key={p.id} data-selected={isSelected} className={isReplaced ? "opacity-70" : undefined}>
         {isAdmin && (
           <TableCell className="w-12">
-            <Checkbox checked={isSelected} onCheckedChange={(checked) => toggleSelection(p.id)} aria-label="Seleccionar participante" />
+            <Checkbox
+              checked={isSelected}
+              disabled={isReplaced}
+              onCheckedChange={(checked) => toggleSelection(p.id)}
+              aria-label="Seleccionar participante"
+            />
           </TableCell>
         )}
         <TableCell className="font-medium">{p.bibNumber}</TableCell>
-        <TableCell className="font-medium">{`${p.name} ${p.surname}`}</TableCell>
+        <TableCell className="font-medium">
+          <div className="flex items-center gap-2">
+            <span>{`${p.name} ${p.surname}`}</span>
+            {isReplaced && <Badge variant="outline">Reemplazado</Badge>}
+          </div>
+        </TableCell>
         <TableCell className="hidden md:table-cell">{age ?? "-"}</TableCell>
         <TableCell className="hidden md:table-cell">{p.gender === "Male" ? "Masculino" : p.gender === "Female" ? "Femenino" : "Otro"}</TableCell>
         <TableCell>{p.distance}</TableCell>
+        {activeRace?.competitionMode === "teams" && (
+          <TableCell className="hidden lg:table-cell">{p.teamId ? teamMap[p.teamId] || "Sin equipo" : "Sin equipo"}</TableCell>
+        )}
         <TableCell className="hidden md:table-cell">
           {p.categoryId ? <Badge variant="secondary">{categoryMap[p.categoryId] || "N/A"}</Badge> : <Badge variant="outline">Sin categoría</Badge>}
         </TableCell>
@@ -695,36 +996,9 @@ export function CompetitorsManager({
         <TableCell className="hidden xl:table-cell">{[p.city, p.province, p.country].filter(Boolean).join(", ") || "-"}</TableCell>
         {isAdmin && (
           <TableCell className="text-right">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8">
-                  <MoreVertical className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => handleOpenDialog(p)}>
-                  <Edit className="mr-2 h-4 w-4" /> Editar
-                </DropdownMenuItem>
-                <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(p.id)}>
-                  <Trash2 className="mr-2 h-4 w-4" /> Eliminar
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </TableCell>
-        )}
-      </TableRow>
-    );
-  };
-
-  const renderParticipantCard = (p: Participant) => {
-    const age = calculateAge(p.birthDate, raceDate, ageCalculationMethod);
-    const isSelected = selectedParticipants.has(p.id);
-    return (
-      <Card key={p.id} data-selected={isSelected}>
-        <CardContent className="p-4 space-y-3">
-          {isAdmin && (
-            <div className="flex items-center justify-between">
-              <Checkbox checked={isSelected} onCheckedChange={() => toggleSelection(p.id)} aria-label="Seleccionar participante" />
+            {isReplaced ? (
+              <Badge variant="outline" className="text-xs">Cambio registrado</Badge>
+            ) : (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -735,21 +1009,68 @@ export function CompetitorsManager({
                   <DropdownMenuItem onClick={() => handleOpenDialog(p)}>
                     <Edit className="mr-2 h-4 w-4" /> Editar
                   </DropdownMenuItem>
-                  <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(p.id)}>
+                  <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(p.id, isReplaced)}>
                     <Trash2 className="mr-2 h-4 w-4" /> Eliminar
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+            )}
+          </TableCell>
+        )}
+      </TableRow>
+    );
+  };
+
+  const renderParticipantCard = (p: Participant) => {
+    const age = calculateAge(p.birthDate, raceDate, ageCalculationMethod);
+    const isSelected = selectedParticipants.has(p.id);
+    const isReplaced = Boolean(p.replacedById);
+    return (
+      <Card key={p.id} data-selected={isSelected} className={isReplaced ? "opacity-70" : undefined}>
+        <CardContent className="p-4 space-y-3">
+          {isAdmin && (
+            <div className="flex items-center justify-between">
+              <Checkbox
+                checked={isSelected}
+                disabled={isReplaced}
+                onCheckedChange={() => toggleSelection(p.id)}
+                aria-label="Seleccionar participante"
+              />
+              {isReplaced ? (
+                <Badge variant="outline" className="text-xs">Reemplazado</Badge>
+              ) : (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => handleOpenDialog(p)}>
+                      <Edit className="mr-2 h-4 w-4" /> Editar
+                    </DropdownMenuItem>
+                    <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(p.id, isReplaced)}>
+                      <Trash2 className="mr-2 h-4 w-4" /> Eliminar
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
             </div>
           )}
           <div>
             <p className="text-sm font-semibold text-primary">#{p.bibNumber}</p>
-            <h3 className="font-semibold">{`${p.name} ${p.surname}`}</h3>
+            <h3 className="font-semibold flex items-center gap-2">
+              <span>{`${p.name} ${p.surname}`}</span>
+              {isReplaced && <Badge variant="outline">Reemplazado</Badge>}
+            </h3>
             <p className="text-sm text-muted-foreground">
               {age ?? "-"} años | {p.distance} | {p.gender === "Male" ? "Masculino" : p.gender === "Female" ? "Femenino" : "Otro"}
             </p>
             <div className="mt-1 flex flex-wrap gap-2">
               {p.categoryId && <Badge variant="secondary">{categoryMap[p.categoryId] || "N/A"}</Badge>}
+              {activeRace?.competitionMode === "teams" && (
+                <Badge variant="outline">{p.teamId ? teamMap[p.teamId] || "Sin equipo" : "Sin equipo"}</Badge>
+              )}
               {p.isSpecial && (
                 <Badge variant="default" className="gap-1 text-xs">
                   <Sparkles className="h-3 w-3" /> Especial
@@ -765,78 +1086,305 @@ export function CompetitorsManager({
     );
   };
 
-  return (
-    <div className="flex flex-col h-full">
-      <p className="mb-2 text-sm text-muted-foreground">
-        Gestionando competidores de <span className="font-semibold text-foreground">{raceName}</span>
-      </p>
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        {isAdmin && (
-          <>
-            <Button onClick={() => handleOpenDialog()}>
-              <Plus className="mr-2 h-4 w-4" /> Añadir Participante
-            </Button>
-            <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
-              <Upload className="mr-2 h-4 w-4" /> Importar
-            </Button>
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileChange}
-              className="hidden"
-              accept=".xlsx, .xls, .csv"
-            />
-            <Button
-              variant="secondary"
-              onClick={() => setIsAssignmentDialogOpen(true)}
-              disabled={participants.length === 0}
-            >
-              <Sparkles className="mr-2 h-4 w-4" /> Asignar categorías
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={selectedParticipants.size === 0 || isBulkDeleting}
-              onClick={handleBulkDelete}
-            >
-              <Trash2 className="mr-2 h-4 w-4" /> Eliminar seleccionados ({selectedParticipants.size})
-            </Button>
-          </>
+  if (!isAdmin) {
+    return (
+      <div className="space-y-4">
+        <p className="mb-2 text-sm text-muted-foreground">
+          Consulta de participantes de <span className="font-semibold text-foreground">{raceName}</span>
+        </p>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Búsqueda por DNI</CardTitle>
+            <CardDescription>Introduce el DNI exacto y presiona buscar para ver coincidencias.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleViewerSearch} className="flex flex-col gap-4 sm:flex-row sm:items-end">
+              <div className="flex-1 space-y-2">
+                <Label htmlFor="dni-search">DNI</Label>
+                <Input
+                  id="dni-search"
+                  value={dniQuery}
+                  onChange={(event) => setDniQuery(event.target.value)}
+                  placeholder="Ej: 30123456"
+                />
+              </div>
+              <Button type="submit" className="sm:w-32">
+                Buscar
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+
+        {hasSearched && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Resultado de la búsqueda</CardTitle>
+              <CardDescription>
+                {searchResults.length === 0
+                  ? "No se encontraron participantes con ese DNI."
+                  : `${searchResults.length} participante(s) encontrado(s).`}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {searchResults.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Intenta con otro DNI.</p>
+              ) : (
+                <div className="overflow-x-auto rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Dorsal</TableHead>
+                        <TableHead>Nombre</TableHead>
+                        <TableHead>Género</TableHead>
+                        <TableHead>Categoría</TableHead>
+                        <TableHead>Distancia</TableHead>
+                        {activeRace?.competitionMode === "teams" && <TableHead>Equipo</TableHead>}
+                        <TableHead>Especial</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {searchResults.map((p) => (
+                        <TableRow key={p.id}>
+                          <TableCell className="font-semibold">{p.bibNumber}</TableCell>
+                          <TableCell className="font-semibold">{`${p.name} ${p.surname}`}</TableCell>
+                          <TableCell>{p.gender === "Male" ? "Masculino" : p.gender === "Female" ? "Femenino" : "Otro"}</TableCell>
+                          <TableCell>
+                            {p.categoryId ? (
+                              <Badge variant="secondary">{categoryMap[p.categoryId] || "Sin categoría"}</Badge>
+                            ) : (
+                              <Badge variant="outline">Sin categoría</Badge>
+                            )}
+                          </TableCell>
+                          <TableCell>{p.distance}</TableCell>
+                          {activeRace?.competitionMode === "teams" && (
+                            <TableCell>{p.teamId ? teamMap[p.teamId] || "Sin equipo" : "Sin equipo"}</TableCell>
+                          )}
+                          <TableCell>
+                            {p.isSpecial ? (
+                              <Badge variant="secondary">Especial</Badge>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         )}
       </div>
+    );
+  }
 
-      {!isMobile ? (
-        <div className="overflow-x-auto rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                {isAdmin && (
-                  <TableHead className="w-12">
-                    <Checkbox
-                      checked={selectedParticipants.size === participants.length && participants.length > 0}
-                      onCheckedChange={(checked) => toggleSelectAll(Boolean(checked))}
-                      aria-label="Seleccionar todos"
-                    />
-                  </TableHead>
+  return (
+    <div className="flex flex-col h-full">
+      <Tabs
+        value={participantTab}
+        onValueChange={(value) => setParticipantTab(value as "list" | "changes")}
+        className="flex flex-col gap-4"
+      >
+        <TabsList className="w-full sm:w-auto">
+          <TabsTrigger value="list">Participantes</TabsTrigger>
+          <TabsTrigger value="changes">Cambios de corredor</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="list" className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Gestionando competidores de <span className="font-semibold text-foreground">{raceName}</span>
+          </p>
+          <div className="space-y-2">
+            <Label htmlFor="participant-search">Buscar competidores</Label>
+            <Input
+              id="participant-search"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="DNI, apellido o nombre"
+            />
+            <p className="text-xs text-muted-foreground">Autobúsqueda desde el tercer caracter.</p>
+          </div>
+          {activeRace?.competitionMode === "teams" && isAdmin && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Equipos</CardTitle>
+                <CardDescription>Define equipos y asigna competidores.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <Input
+                    placeholder="Nombre del equipo"
+                    value={newTeamName}
+                    onChange={(event) => setNewTeamName(event.target.value)}
+                  />
+                  <Button onClick={handleAddTeam} className="sm:w-auto">
+                    <Plus className="mr-2 h-4 w-4" /> Crear equipo
+                  </Button>
+                </div>
+                {teams.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Aún no hay equipos cargados.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {teams.map((team) => (
+                      <div key={team.id} className="flex items-center gap-2 rounded border px-3 py-2 text-sm">
+                        <span className="font-medium">{team.name}</span>
+                        <span className="text-muted-foreground">{teamCounts[team.id] || 0} integrantes</span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => handleDeleteTeam(team.id)}
+                          disabled={(teamCounts[team.id] || 0) > 0}
+                          title={teamCounts[team.id] > 0 ? "No puedes eliminar un equipo con integrantes" : "Eliminar equipo"}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
                 )}
-                <TableHead>Dorsal</TableHead>
-                <TableHead>Nombre</TableHead>
-                <TableHead className="hidden md:table-cell">Edad</TableHead>
-                <TableHead className="hidden md:table-cell">Género</TableHead>
-                <TableHead>Distancia</TableHead>
-                <TableHead className="hidden md:table-cell">Categoría</TableHead>
-                <TableHead className="hidden sm:table-cell">Especial</TableHead>
-                <TableHead className="hidden xl:table-cell">Ubicación</TableHead>
-                {isAdmin && <TableHead className="text-right">Acciones</TableHead>}
-              </TableRow>
-            </TableHeader>
-            <TableBody>{participants.map((p) => renderParticipantRow(p))}</TableBody>
-          </Table>
-        </div>
-      ) : (
-        <div className="grid gap-4">
-          {participants.map((p) => renderParticipantCard(p))}
-        </div>
-      )}
+              </CardContent>
+            </Card>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {canCreateIndividual && (
+              <Button onClick={() => handleOpenDialog()}>
+                <Plus className="mr-2 h-4 w-4" /> Añadir Participante
+              </Button>
+            )}
+            {isAdmin && (
+              <>
+                <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
+                  <Upload className="mr-2 h-4 w-4" /> Importar
+                </Button>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileChange}
+                  className="hidden"
+                  accept=".xlsx, .xls, .csv"
+                />
+                <Button
+                  variant="outline"
+                  onClick={handleOpenBibDialog}
+                  disabled={selectableParticipants.length === 0}
+                >
+                  <Hash className="mr-2 h-4 w-4" /> Asignar dorsales
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => setIsAssignmentDialogOpen(true)}
+                  disabled={selectableParticipants.length === 0}
+                >
+                  <Sparkles className="mr-2 h-4 w-4" /> Asignar categorías
+                </Button>
+                <Button
+                  variant="destructive"
+                  disabled={selectedParticipants.size === 0 || isBulkDeleting}
+                  onClick={handleBulkDelete}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" /> Eliminar seleccionados ({selectedParticipants.size})
+                </Button>
+              </>
+            )}
+          </div>
+
+          {!isMobile ? (
+            <div className="overflow-x-auto rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    {isAdmin && (
+                      <TableHead className="w-12">
+                        <Checkbox
+                          checked={allVisibleSelected}
+                          disabled={selectableParticipants.length === 0}
+                          onCheckedChange={(checked) => toggleSelectAll(Boolean(checked))}
+                          aria-label="Seleccionar todos"
+                        />
+                      </TableHead>
+                    )}
+                    <TableHead>Dorsal</TableHead>
+                    <TableHead>Nombre</TableHead>
+                    <TableHead className="hidden md:table-cell">Edad</TableHead>
+                    <TableHead className="hidden md:table-cell">Género</TableHead>
+                    <TableHead>Distancia</TableHead>
+                    {activeRace?.competitionMode === "teams" && <TableHead className="hidden lg:table-cell">Equipo</TableHead>}
+                    <TableHead className="hidden md:table-cell">Categoría</TableHead>
+                    <TableHead className="hidden sm:table-cell">Especial</TableHead>
+                    <TableHead className="hidden xl:table-cell">Ubicación</TableHead>
+                    {isAdmin && <TableHead className="text-right">Acciones</TableHead>}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>{filteredParticipants.map((p) => renderParticipantRow(p))}</TableBody>
+              </Table>
+            </div>
+          ) : (
+            <div className="grid gap-4">
+              {filteredParticipants.map((p) => renderParticipantCard(p))}
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="changes" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Historial de cambios de corredor</CardTitle>
+              <CardDescription>Registros de reemplazos guardados desde entrega de kits.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {runnerChanges.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Aún no hay cambios registrados.</p>
+              ) : (
+                <div className="overflow-x-auto rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Fecha</TableHead>
+                        <TableHead>Dorsal</TableHead>
+                        <TableHead>Anterior</TableHead>
+                        <TableHead>Nuevo</TableHead>
+                        <TableHead>Categoría</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {runnerChanges.map((change) => (
+                        <TableRow key={change.id}>
+                          <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
+                            {new Date(change.createdAt).toLocaleString()}
+                          </TableCell>
+                          <TableCell className="font-semibold">{change.previous.bibNumber}</TableCell>
+                          <TableCell>
+                            <div className="flex flex-col">
+                              <span className="font-medium">{`${change.previous.name} ${change.previous.surname}`}</span>
+                              <span className="text-xs text-muted-foreground">DNI: {change.previous.dni}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-col">
+                              <span className="font-medium">{`${change.next.name} ${change.next.surname}`}</span>
+                              <span className="text-xs text-muted-foreground">DNI: {change.next.dni}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            {change.next.categoryId ? (
+                              <Badge variant="secondary">{categoryMap[change.next.categoryId] || "Sin categoría"}</Badge>
+                            ) : (
+                              <Badge variant="outline">Sin categoría</Badge>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
@@ -966,6 +1514,64 @@ export function CompetitorsManager({
               </div>
               <FormField
                 control={form.control}
+                name="shirtSize"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Talle de remera</FormLabel>
+                    <Select
+                      onValueChange={(value) => field.onChange(value === "none" ? undefined : value)}
+                      value={field.value ?? "none"}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecciona un talle" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="none">Sin talle</SelectItem>
+                        {SHIRT_SIZES.map((size) => (
+                          <SelectItem key={size} value={size}>
+                            {size}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              {activeRace?.competitionMode === "teams" && (
+                <FormField
+                  control={form.control}
+                  name="teamId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Equipo</FormLabel>
+                      <Select
+                        onValueChange={(value) => field.onChange(value === "none" ? undefined : value)}
+                        value={field.value ?? "none"}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecciona un equipo" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="none">Sin equipo</SelectItem>
+                          {teams.map((team) => (
+                            <SelectItem key={team.id} value={team.id}>
+                              {team.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+              <FormField
+                control={form.control}
                 name="isSpecial"
                 render={({ field }) => (
                   <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-3">
@@ -1033,6 +1639,143 @@ export function CompetitorsManager({
               </DialogFooter>
             </form>
           </Form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isBibDialogOpen} onOpenChange={setIsBibDialogOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Asignar dorsales</DialogTitle>
+            <DialogDescription>
+              Asigna o reasigna dorsales manualmente. Los chips se recalculan automáticamente según el dorsal.
+            </DialogDescription>
+          </DialogHeader>
+          <Tabs value={bibTab} onValueChange={(value) => setBibTab(value as "single" | "bulk")} className="mt-2">
+            <TabsList className="grid grid-cols-2">
+              <TabsTrigger value="single">Individual</TabsTrigger>
+              <TabsTrigger value="bulk">Masivo</TabsTrigger>
+            </TabsList>
+            <TabsContent value="single" className="space-y-4 pt-4">
+              <div className="space-y-2">
+                <Label>Participante</Label>
+                <Select
+                  value={singleBibParticipantId}
+                  onValueChange={(value) => setSingleBibParticipantId(value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Elige un participante" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {participants.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {`${p.bibNumber ? `${p.bibNumber} - ` : ""}${p.name} ${p.surname} (${p.distance})`}`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Dorsal</Label>
+                <Input value={singleBibNumber} onChange={(e) => setSingleBibNumber(e.target.value)} />
+                <p className="text-xs text-muted-foreground">El chip se regenerará en base al dorsal indicado.</p>
+              </div>
+            </TabsContent>
+            <TabsContent value="bulk" className="space-y-4 pt-4">
+              <p className="text-sm text-muted-foreground">
+                Define un rango y filtra por distancia, género o edad para asignar dorsales consecutivos automáticamente.
+              </p>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Dorsal desde</Label>
+                  <Input
+                    type="number"
+                    value={bulkBibRange.from}
+                    onChange={(e) => setBulkBibRange((prev) => ({ ...prev, from: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Dorsal hasta</Label>
+                  <Input
+                    type="number"
+                    value={bulkBibRange.to}
+                    onChange={(e) => setBulkBibRange((prev) => ({ ...prev, to: e.target.value }))}
+                  />
+                </div>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Distancia</Label>
+                  <Select
+                    value={bulkBibDistance}
+                    onValueChange={(value) => setBulkBibDistance(value as Participant["distance"] | "all")}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Todas" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todas</SelectItem>
+                      <SelectItem value="5k">5k</SelectItem>
+                      <SelectItem value="10k">10k</SelectItem>
+                      <SelectItem value="21k">21k</SelectItem>
+                      <SelectItem value="42k">42k</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Género</Label>
+                  <Select
+                    value={bulkBibGender}
+                    onValueChange={(value) => setBulkBibGender(value as Participant["gender"] | "any")}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Todos" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="any">Todos</SelectItem>
+                      <SelectItem value="Male">Masculino</SelectItem>
+                      <SelectItem value="Female">Femenino</SelectItem>
+                      <SelectItem value="Other">Otro</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Edad mínima</Label>
+                  <Input value={bulkBibMinAge} onChange={(e) => setBulkBibMinAge(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Edad máxima</Label>
+                  <Input value={bulkBibMaxAge} onChange={(e) => setBulkBibMaxAge(e.target.value)} />
+                </div>
+              </div>
+              <div className="flex items-center space-x-2 rounded-md border p-3">
+                <Checkbox
+                  id="include-assigned-bibs"
+                  checked={includeAssignedBibs}
+                  onCheckedChange={(checked) => setIncludeAssignedBibs(Boolean(checked))}
+                />
+                <div className="space-y-1 leading-none">
+                  <Label htmlFor="include-assigned-bibs" className="font-normal">
+                    Reasignar aunque ya tengan dorsal
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Si está desactivado, solo se asignarán dorsales a quienes no tengan uno cargado.
+                  </p>
+                </div>
+              </div>
+            </TabsContent>
+          </Tabs>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="secondary">
+                Cancelar
+              </Button>
+            </DialogClose>
+            <Button onClick={handleBibAssignmentSubmit} disabled={isAssigningBibs}>
+              {isAssigningBibs ? "Asignando..." : "Guardar"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

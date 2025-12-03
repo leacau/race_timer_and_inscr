@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import * as db from "./data";
 import { assignCategory } from "./logic";
-import { generateChipNumber } from "./utils";
+import { calculateAge, generateChipNumber } from "./utils";
 import type {
   AgeCalculationMethod,
   Category,
@@ -13,7 +13,10 @@ import type {
   Participant,
   ParticipantFirestoreData,
   ParticipantInput,
+  ParticipantSnapshot,
+  Race,
   RaceInput,
+  Role,
 } from "./types";
 
 type SelectionTarget = { type: "selection"; ids: string[] };
@@ -28,6 +31,17 @@ export type CategoryAssignmentOptions =
 
 export type TimingMode = 'general' | 'distance' | 'category';
 
+type BibAssignmentFilters = {
+  distance?: Participant["distance"];
+  gender?: Participant["gender"];
+  minAge?: number;
+  maxAge?: number;
+};
+
+export type BibAssignmentOptions =
+  | { mode: "single"; participantId: string; bibNumber: string }
+  | { mode: "bulk"; fromBib: string; toBib: string; filters?: BibAssignmentFilters; includeAssigned?: boolean };
+
 // Participant Actions
 export async function addParticipant(
   participantData: ParticipantInput,
@@ -37,19 +51,26 @@ export async function addParticipant(
 ) {
   const categories = await db.getCategories(raceId);
   const categoryId = assignCategory(participantData, categories, raceDate, ageCalculationMethod);
-  const chipNumber = generateChipNumber(participantData.bibNumber);
+  const bibNumber = participantData.bibNumber ?? "";
+  const chipNumber = generateChipNumber(bibNumber);
 
   const participantToSave: ParticipantFirestoreData = {
     raceId,
     ...participantData,
+    bibNumber,
     city: participantData.city || null,
     province: participantData.province || null,
     country: participantData.country || null,
+    shirtSize: participantData.shirtSize || null,
     isSpecial: Boolean(participantData.isSpecial),
     categoryId,
     chipNumber,
     startTime: null,
     finishTime: null,
+    kitDelivered: false,
+    replacedFromId: null,
+    replacedById: null,
+    teamId: participantData.teamId || null,
   };
   
   await db.addParticipant(participantToSave);
@@ -66,11 +87,20 @@ export async function updateParticipant(
 ) {
   const categories = await db.getCategories(raceId);
   const categoryId = assignCategory(participantData, categories, raceDate, ageCalculationMethod);
+  const bibNumber = participantData.bibNumber ?? "";
+  const chipNumber = generateChipNumber(bibNumber);
 
   const dataToUpdate: Partial<ParticipantFirestoreData> = {
     ...participantData,
+    bibNumber,
     isSpecial: Boolean(participantData.isSpecial),
     categoryId,
+    chipNumber,
+    city: participantData.city || null,
+    province: participantData.province || null,
+    country: participantData.country || null,
+    shirtSize: participantData.shirtSize || null,
+    teamId: participantData.teamId || null,
   };
 
   await db.updateParticipant(id, dataToUpdate);
@@ -84,6 +114,87 @@ export async function deleteParticipant(id: string) {
   revalidatePath("/competitors");
 }
 
+export async function toggleKitDelivered(participantId: string, delivered: boolean, raceId?: string) {
+  await db.updateParticipant(participantId, { kitDelivered: delivered });
+  revalidatePath("/");
+  if (raceId) {
+    revalidatePath(`/races/${raceId}`);
+    revalidatePath(`/kits/${raceId}`);
+  }
+}
+
+export async function replaceParticipant(
+  participantId: string,
+  replacement: ParticipantInput,
+  raceDate: Date,
+  ageCalculationMethod: AgeCalculationMethod,
+  raceId: string
+): Promise<{ newParticipantId: string }> {
+  const original = await db.getParticipant(participantId);
+  if (!original) {
+    throw new Error("Participante no encontrado para reemplazar.");
+  }
+
+  const categories = await db.getCategories(raceId);
+  const categoryId = assignCategory(replacement, categories, raceDate, ageCalculationMethod);
+
+  const previousSnapshot: ParticipantSnapshot = {
+    id: original.id,
+    bibNumber: original.bibNumber,
+    chipNumber: original.chipNumber,
+    name: original.name,
+    surname: original.surname,
+    dni: original.dni,
+    gender: original.gender,
+    distance: original.distance,
+    birthDate: original.birthDate,
+    categoryId: original.categoryId,
+  };
+
+  const newParticipantData: ParticipantFirestoreData = {
+    raceId,
+    ...replacement,
+    categoryId,
+    chipNumber: original.chipNumber,
+    bibNumber: original.bibNumber,
+    isSpecial: Boolean(replacement.isSpecial),
+    city: replacement.city || null,
+    province: replacement.province || null,
+    country: replacement.country || null,
+    shirtSize: replacement.shirtSize || original.shirtSize || null,
+    teamId: replacement.teamId || original.teamId || null,
+    kitDelivered: original.kitDelivered ?? false,
+    replacedFromId: original.id,
+    replacedById: null,
+    startTime: original.startTime,
+    finishTime: original.finishTime,
+  };
+
+  const newParticipantId = await db.addParticipant(newParticipantData);
+
+  const nextSnapshot: ParticipantSnapshot = {
+    id: newParticipantId,
+    bibNumber: original.bibNumber,
+    chipNumber: original.chipNumber,
+    name: replacement.name,
+    surname: replacement.surname,
+    dni: replacement.dni,
+    gender: replacement.gender,
+    distance: replacement.distance,
+    birthDate: replacement.birthDate,
+    categoryId,
+  };
+
+  await db.updateParticipant(participantId, { replacedById: newParticipantId });
+  await db.addRunnerChange({ raceId, participantId: newParticipantId, previous: previousSnapshot, next: nextSnapshot });
+
+  revalidatePath("/");
+  revalidatePath(`/races/${raceId}`);
+  revalidatePath(`/kits/${raceId}`);
+
+  return { newParticipantId };
+}
+
 export async function bulkDeleteParticipants(ids: string[]) {
   if (ids.length === 0) return { deleted: 0 };
   await db.bulkDeleteParticipants(ids);
@@ -95,34 +206,54 @@ export async function bulkDeleteParticipants(ids: string[]) {
 export async function updateParticipantTime(
   id: string,
   startTime: number,
-  finishTime: number
+  finishTime: number,
+  instanceId?: string | null,
+  nextInstanceId?: string | null
 ) {
-  await db.updateParticipantTime(id, startTime, finishTime);
+  await db.updateParticipantTime(id, startTime, finishTime, instanceId, nextInstanceId);
   revalidatePath("/");
   revalidatePath("/competitors");
 }
 
-export async function startTimingGroup(raceId: string, mode: TimingMode, groupId?: string | null) {
+export async function startTimingGroup(
+  raceId: string,
+  mode: TimingMode,
+  groupId?: string | null,
+  instanceId?: string | null
+) {
   const participants = await db.getParticipants(raceId);
+  const activeParticipants = participants.filter((participant) => !participant.replacedById);
   let targets: Participant[] = [];
 
   if (mode === 'general') {
-    targets = participants;
+    targets = activeParticipants;
   } else if (mode === 'distance') {
-    targets = participants.filter((p) => p.distance === groupId);
+    targets = activeParticipants.filter((p) => p.distance === groupId);
   } else {
-    targets = participants.filter((p) => p.categoryId === (groupId ?? null));
+    targets = activeParticipants.filter((p) => p.categoryId === (groupId ?? null));
   }
 
   if (targets.length === 0) {
     return { updated: 0 };
   }
 
+  const missingFields = targets.filter((participant) => !participant.bibNumber || !participant.chipNumber);
+  if (missingFields.length > 0) {
+    throw new Error("No puedes iniciar la carrera: faltan dorsales o chips en algunos participantes.");
+  }
+
   const startTime = Date.now();
   await db.bulkUpdateParticipants(
     targets.map((participant) => ({
       id: participant.id,
-      data: { startTime, finishTime: null },
+      data: instanceId
+        ? {
+            instanceTimes: {
+              ...(participant.instanceTimes ?? {}),
+              [instanceId]: { startTime, finishTime: null },
+            },
+          }
+        : { startTime, finishTime: null },
     }))
   );
 
@@ -130,16 +261,22 @@ export async function startTimingGroup(raceId: string, mode: TimingMode, groupId
   return { updated: targets.length, startTime };
 }
 
-export async function resetTimingGroup(raceId: string, mode: TimingMode, groupId?: string | null) {
+export async function resetTimingGroup(
+  raceId: string,
+  mode: TimingMode,
+  groupId?: string | null,
+  instanceId?: string | null
+) {
   const participants = await db.getParticipants(raceId);
+  const activeParticipants = participants.filter((participant) => !participant.replacedById);
   let targets: Participant[] = [];
 
   if (mode === 'general') {
-    targets = participants;
+    targets = activeParticipants;
   } else if (mode === 'distance') {
-    targets = participants.filter((p) => p.distance === groupId);
+    targets = activeParticipants.filter((p) => p.distance === groupId);
   } else {
-    targets = participants.filter((p) => (p.categoryId ?? null) === (groupId ?? null));
+    targets = activeParticipants.filter((p) => (p.categoryId ?? null) === (groupId ?? null));
   }
 
   if (targets.length === 0) {
@@ -149,7 +286,14 @@ export async function resetTimingGroup(raceId: string, mode: TimingMode, groupId
   await db.bulkUpdateParticipants(
     targets.map((participant) => ({
       id: participant.id,
-      data: { startTime: null, finishTime: null },
+      data: instanceId
+        ? {
+            instanceTimes: {
+              ...(participant.instanceTimes ?? {}),
+              [instanceId]: { startTime: null, finishTime: null },
+            },
+          }
+        : { startTime: null, finishTime: null },
     }))
   );
 
@@ -187,6 +331,10 @@ export async function importParticipants(
         province: p.province || null,
         country: p.country || null,
         isSpecial: Boolean(p.isSpecial),
+        teamId: null,
+        kitDelivered: false,
+        replacedFromId: null,
+        replacedById: null,
     };
     return data;
   });
@@ -200,6 +348,27 @@ export async function importParticipants(
   revalidatePath("/");
   revalidatePath("/competitors");
   return { count: participantsToCreate.length };
+}
+
+export async function addTeamToRace(raceId: string, name: string) {
+  await db.addTeam({ raceId, name });
+  revalidatePath(`/races/${raceId}`);
+  revalidatePath(`/kits/${raceId}`);
+  revalidatePath("/competitors");
+}
+
+export async function renameTeam(raceId: string, teamId: string, name: string) {
+  await db.updateTeam(teamId, { name });
+  revalidatePath(`/races/${raceId}`);
+  revalidatePath(`/kits/${raceId}`);
+  revalidatePath("/competitors");
+}
+
+export async function removeTeam(raceId: string, teamId: string) {
+  await db.deleteTeam(teamId);
+  revalidatePath(`/races/${raceId}`);
+  revalidatePath(`/kits/${raceId}`);
+  revalidatePath("/competitors");
 }
 
 const toComparableBib = (value: string): string | number => {
@@ -281,6 +450,120 @@ export async function assignCategoriesToParticipants(
       updates.push({ id: participant.id, data });
     });
   }
+
+  await db.bulkUpdateParticipants(updates);
+  revalidatePath("/");
+  revalidatePath("/competitors");
+  return { updated: updates.length };
+}
+
+export async function assignBibNumbers(
+  options: BibAssignmentOptions,
+  raceDate: Date,
+  ageCalculationMethod: AgeCalculationMethod,
+  raceId: string
+) {
+  const participants = await db.getParticipants(raceId);
+
+  const hasConflict = (bib: string, ignoreIds: Set<string>) => {
+    const normalized = bib.trim();
+    return participants.some((p) => !ignoreIds.has(p.id) && p.bibNumber.trim() === normalized);
+  };
+
+  if (options.mode === "single") {
+    const target = participants.find((p) => p.id === options.participantId);
+    if (!target) {
+      throw new Error("Participante no encontrado para asignar dorsal.");
+    }
+
+    const bib = options.bibNumber.trim();
+    if (!bib) {
+      throw new Error("Debes indicar un dorsal válido.");
+    }
+
+    const ignoreIds = new Set<string>([target.id]);
+    if (hasConflict(bib, ignoreIds)) {
+      throw new Error(`El dorsal ${bib} ya está asignado a otro participante.`);
+    }
+
+    await db.updateParticipant(target.id, {
+      bibNumber: bib,
+      chipNumber: generateChipNumber(bib),
+    });
+
+    revalidatePath("/");
+    revalidatePath("/competitors");
+    return { updated: 1 };
+  }
+
+  const from = parseInt(options.fromBib, 10);
+  const to = parseInt(options.toBib, 10);
+
+  if (Number.isNaN(from) || Number.isNaN(to)) {
+    throw new Error("Los dorsales de inicio y fin deben ser numéricos.");
+  }
+
+  const filters = options.filters ?? {};
+  const includeAssigned = Boolean(options.includeAssigned);
+
+  const targets = participants
+    .filter((p) => {
+      if (!includeAssigned && p.bibNumber) return false;
+      if (filters.distance && p.distance !== filters.distance) return false;
+      if (filters.gender && p.gender !== filters.gender) return false;
+      const age = calculateAge(p.birthDate, raceDate, ageCalculationMethod);
+      if (typeof filters.minAge === "number" && (age === null || age < filters.minAge)) return false;
+      if (typeof filters.maxAge === "number" && (age === null || age > filters.maxAge)) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      const surnameCompare = a.surname.localeCompare(b.surname, "es", { sensitivity: "base" });
+      if (surnameCompare !== 0) return surnameCompare;
+      return a.name.localeCompare(b.name, "es", { sensitivity: "base" });
+    });
+
+  if (targets.length === 0) {
+    return { updated: 0 };
+  }
+
+  const start = from;
+  const end = to;
+  const step = start <= end ? 1 : -1;
+
+  const reservedBibs = new Set<string>();
+  const targetIds = new Set(targets.map((t) => t.id));
+  participants.forEach((p) => {
+    if (targetIds.has(p.id)) return;
+    if (p.bibNumber) {
+      reservedBibs.add(p.bibNumber.trim());
+    }
+  });
+
+  const availableBibs: string[] = [];
+  for (let current = start; step === 1 ? current <= end : current >= end; current += step) {
+    const candidate = String(current);
+    if (!reservedBibs.has(candidate)) {
+      availableBibs.push(candidate);
+    }
+    if (availableBibs.length >= targets.length) {
+      break;
+    }
+  }
+
+  if (availableBibs.length < targets.length) {
+    throw new Error("El rango no tiene suficientes dorsales libres para los participantes seleccionados.");
+  }
+
+  const updates = targets.map((participant, index) => {
+    const bibNumber = availableBibs[index];
+    return {
+      id: participant.id,
+      data: {
+        bibNumber,
+        chipNumber: generateChipNumber(bibNumber),
+      },
+    };
+  });
 
   await db.bulkUpdateParticipants(updates);
   revalidatePath("/");
@@ -478,7 +761,29 @@ export async function addRace(data: RaceInput) {
 }
 
 export async function updateRace(id: string, data: RaceInput) {
+  const previous = await db.getRace(id);
   await db.updateRace(id, data);
+
+  if (previous && (previous.ageCalculationMethod !== data.ageCalculationMethod || previous.eventDate !== data.eventDate)) {
+    const [participants, categories] = await Promise.all([db.getParticipants(id), db.getCategories(id)]);
+    const raceDate = data.eventDate ? new Date(data.eventDate) : new Date();
+
+    const updates = participants.map((participant) => ({
+      id: participant.id,
+      data: {
+        categoryId: assignCategory(
+          { distance: participant.distance, gender: participant.gender, birthDate: participant.birthDate },
+          categories,
+          raceDate,
+          data.ageCalculationMethod
+        ),
+      },
+    }));
+
+    if (updates.length > 0) {
+      await db.bulkUpdateParticipants(updates);
+    }
+  }
   revalidatePath("/");
   revalidatePath("/competitors");
   revalidatePath("/categories");
@@ -491,4 +796,178 @@ export async function deleteRace(id: string) {
   revalidatePath("/competitors");
   revalidatePath("/categories");
   revalidatePath("/races");
+}
+
+export async function finalizeRaceTiming(
+  raceId: string,
+  options?: { aggregateBy?: "time" | "points"; instanceIds?: string[]; sessionIds?: string[] }
+) {
+  const [race, participants] = await Promise.all([db.getRace(raceId), db.getParticipants(raceId)]);
+  const activeParticipants = participants.filter((participant) => !participant.replacedById);
+  const aggregateBy = options?.aggregateBy ?? race?.evaluationMethod ?? "time";
+  const selectedInstanceIds =
+    options?.instanceIds ??
+    (race?.isMultiStage && race?.instances?.length
+      ? (race.includeInstancesInResult
+          ? race.instances.some((instance) => instance.includeInResult)
+            ? race.instances.filter((instance) => instance.includeInResult)
+            : race.instances
+          : race.instances.filter((instance) => instance.includeInResult)
+        ).map((instance) => instance.id)
+      : []);
+  const selectedSessionIds =
+    options?.sessionIds ?? (race?.timingAggregation === "multiple" ? (race.sessions ?? []).map((session) => session.id) : []);
+  const knownStarts = activeParticipants
+    .flatMap((participant) => {
+      const baseTimes: number[] = [];
+      if (participant.startTime) baseTimes.push(participant.startTime);
+      if (participant.instanceTimes) {
+        Object.values(participant.instanceTimes).forEach((instance) => {
+          if (instance?.startTime) baseTimes.push(instance.startTime);
+        });
+      }
+      return baseTimes;
+    })
+    .filter(Boolean) as number[];
+
+  const raceStartTime = race?.raceStartTime ?? (knownStarts.length > 0 ? Math.min(...knownStarts) : Date.now());
+  const raceEndTime = Date.now();
+  const sessions = Array.isArray(race?.sessions) ? [...race!.sessions] : [];
+  const sessionEntry: Race["sessions"][number] = {
+    id: `${raceEndTime}`,
+    label: `Final ${sessions.length + 1}`,
+    startTime: raceStartTime,
+    endTime: raceEndTime,
+  };
+
+  const finalAggregation =
+    race?.isMultiStage || race?.timingAggregation === "multiple"
+      ? {
+          aggregateBy,
+          instanceIds: selectedInstanceIds ?? [],
+          sessionIds: selectedSessionIds ?? [],
+        }
+      : null;
+
+  await db.updateRaceFields(raceId, {
+    raceStartTime,
+    raceEndTime,
+    finalized: true,
+    sessions: race?.timingAggregation === "multiple" ? [...sessions, sessionEntry] : sessions,
+    finalAggregation,
+  });
+
+  if (race?.isMultiStage && (race.instances?.length ?? 0) > 0 && selectedInstanceIds.length > 0) {
+    const includedInstances = race.instances.filter((instance) => selectedInstanceIds.includes(instance.id));
+
+    if (includedInstances.length > 0) {
+      const instanceIds = includedInstances.map((instance) => instance.id);
+      const updates = activeParticipants
+        .map((participant) => {
+          const times = participant.instanceTimes ?? {};
+          let total = 0;
+          let earliest: number | null = participant.startTime ?? null;
+          if (aggregateBy === "time") {
+            for (const id of instanceIds) {
+              const record = times[id];
+              if (!record?.startTime || !record?.finishTime) return null;
+              if (earliest === null || record.startTime < earliest) {
+                earliest = record.startTime;
+              }
+              total += record.finishTime - record.startTime;
+            }
+          } else {
+            total = instanceIds.reduce((acc, id) => acc + (times[id]?.points ?? 0), 0);
+          }
+
+          const aggregationFields: Partial<ParticipantFirestoreData> = {
+            aggregatedType: aggregateBy,
+            aggregatedValue: aggregateBy === "time" ? total : total ?? 0,
+            aggregatedInstanceIds: instanceIds,
+            aggregatedSessionIds: selectedSessionIds ?? [],
+          };
+
+          if (aggregateBy === "time") {
+            if (earliest === null) return null;
+            return {
+              id: participant.id,
+              data: {
+                startTime: earliest,
+                finishTime: earliest + total,
+                ...aggregationFields,
+              },
+            } as { id: string; data: Partial<ParticipantFirestoreData> };
+          }
+
+          return {
+            id: participant.id,
+            data: aggregationFields,
+          } as { id: string; data: Partial<ParticipantFirestoreData> };
+        })
+        .filter(Boolean) as { id: string; data: Partial<ParticipantFirestoreData> }[];
+
+      if (updates.length > 0) {
+        await db.bulkUpdateParticipants(updates);
+      }
+    }
+  }
+
+  revalidatePath("/");
+  revalidatePath(`/races/${raceId}`);
+  revalidatePath(`/kits/${raceId}`);
+
+  return { raceStartTime, raceEndTime };
+}
+
+export async function resetRaceTiming(raceId: string) {
+  const race = await db.getRace(raceId);
+  const participants = await db.getParticipants(raceId);
+  const instanceDefaults = (race?.instances ?? []).reduce(
+    (acc, instance) => {
+      acc[instance.id] = { startTime: null, finishTime: null };
+      return acc;
+    },
+    {} as Record<string, { startTime: null; finishTime: null }>
+  );
+
+  await db.bulkUpdateParticipants(
+    participants.map((participant) => ({
+      id: participant.id,
+      data: {
+        startTime: null,
+        finishTime: null,
+        instanceTimes:
+          Object.keys(participant.instanceTimes ?? {}).length > 0 || Object.keys(instanceDefaults).length > 0
+            ? instanceDefaults
+            : undefined,
+        aggregatedType: null,
+        aggregatedValue: null,
+        aggregatedInstanceIds: [],
+        aggregatedSessionIds: [],
+      },
+    }))
+  );
+
+  await db.updateRaceFields(raceId, {
+    raceStartTime: null,
+    raceEndTime: null,
+    finalized: false,
+    sessions: race?.timingAggregation === "multiple" ? [] : race?.sessions ?? [],
+    finalAggregation: null,
+  });
+
+  revalidatePath("/");
+  revalidatePath(`/races/${raceId}`);
+  revalidatePath(`/kits/${raceId}`);
+
+  return { cleared: participants.length };
+}
+
+export async function updateUserRole(userId: string, role: Role) {
+  await db.setUserRole(userId, role);
+  revalidatePath("/admin/users");
+}
+
+export async function trackVisitorEmail(email: string) {
+  await db.saveVisitorEmail(email);
 }

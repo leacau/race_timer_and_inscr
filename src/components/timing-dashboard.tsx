@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState, useContext, useEffect } from "react";
+import React, { useMemo, useState, useContext, useEffect, useCallback } from "react";
 import * as XLSX from "xlsx";
 import type { Participant, Category, Race } from "@/lib/types";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,10 +10,28 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { AppContext } from "@/context/app-context";
 import { formatElapsedTime } from "@/lib/utils";
-import { resetTimingGroup, startTimingGroup, TimingMode, updateParticipantTime } from "@/lib/actions";
+import {
+  finalizeRaceTiming,
+  resetRaceTiming,
+  resetTimingGroup,
+  startTimingGroup,
+  TimingMode,
+  updateParticipantTime,
+} from "@/lib/actions";
 import { cn } from "@/lib/utils";
 import { Lock, Unlock } from "lucide-react";
 
@@ -40,7 +58,10 @@ type ArrivalEntry = {
   gender: Participant["gender"];
   startTime: number;
   finishTime: number;
+  isSpecial: boolean;
   isDuplicate?: boolean;
+  totalTime?: number | null;
+  instanceId?: string | null;
 };
 
 const modeOptions: { value: TimingMode; label: string }[] = [
@@ -56,6 +77,8 @@ const genderLabels: Record<Participant["gender"], string> = {
   Female: "Femenino",
   Other: "Otro",
 };
+
+const utf8Encoder = new TextEncoder();
 
 const downloadBlob = (blob: Blob, filename: string) => {
   const url = URL.createObjectURL(blob);
@@ -100,19 +123,20 @@ const wrapText = (line: string, maxChars = 100) => {
 };
 
 const encodePdfText = (text: string) => {
-  return text
-    .split("")
-    .map((char) => {
-      const code = char.charCodeAt(0);
-      if (char === "\\" || char === "(" || char === ")") {
-        return `\\${char}`;
-      }
-      if (code < 32 || code > 126) {
-        return `\\${code.toString(8).padStart(3, "0")}`;
-      }
-      return char;
-    })
-    .join("");
+  const bytes: number[] = [];
+
+  for (const char of Array.from(text)) {
+    const code = char.codePointAt(0)!;
+    if (code <= 0xff) {
+      bytes.push(code);
+    } else {
+      // Fallback for characters outside WinAnsi/cp1252 range
+      bytes.push("?".charCodeAt(0));
+    }
+  }
+
+  const hex = bytes.map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `<${hex}>`;
 };
 
 type PdfSection = {
@@ -130,7 +154,7 @@ const buildTablesPdf = (title: string, sections: PdfSection[]) => {
   const rowPadding = 6;
   const textLineHeight = 12;
   const tableWidth = pageWidth - margin * 2;
-  const encoder = new TextEncoder();
+  const encoder = utf8Encoder;
   const safeSections =
     sections.length > 0
       ? sections
@@ -144,7 +168,7 @@ const buildTablesPdf = (title: string, sections: PdfSection[]) => {
       pageContents.push(currentContent);
     }
     currentY = pageHeight - margin;
-    currentContent = `BT /F2 16 Tf ${margin} ${currentY} Td (${encodePdfText(title)}) Tj ET\n`;
+    currentContent = `BT /F2 16 Tf ${margin} ${currentY} Td ${encodePdfText(title)} Tj ET\n`;
     currentY -= lineGap * 2;
   };
 
@@ -187,9 +211,9 @@ const buildTablesPdf = (title: string, sections: PdfSection[]) => {
       const textColor = options.textColor ?? [0, 0, 0];
       lines.forEach((line) => {
         textY -= textLineHeight;
-        currentContent += `BT ${options.font} ${options.fontSize} Tf ${textColor.join(" ")} rg ${xCursor + columnPadding} ${textY} Td (${encodePdfText(
+        currentContent += `BT ${options.font} ${options.fontSize} Tf ${textColor.join(" ")} rg ${xCursor + columnPadding} ${textY} Td ${encodePdfText(
           line
-        )}) Tj ET\n`;
+        )} Tj ET\n`;
       });
       xCursor += columnWidths[index];
     });
@@ -217,7 +241,7 @@ const buildTablesPdf = (title: string, sections: PdfSection[]) => {
 
     ensureSpace(estimatedHeight);
 
-    currentContent += `BT /F2 14 Tf ${margin} ${currentY} Td (${encodePdfText(section.title)}) Tj ET\n`;
+    currentContent += `BT /F2 14 Tf ${margin} ${currentY} Td ${encodePdfText(section.title)} Tj ET\n`;
     currentY -= lineGap;
 
     drawRow(section.headers.map(String), columnWidths, {
@@ -269,8 +293,8 @@ const buildTablesPdf = (title: string, sections: PdfSection[]) => {
   });
 
   objects[2] = `2 0 obj\n<< /Type /Pages /Kids [${kids.join(" ")}] /Count ${totalPages} >>\nendobj`;
-  objects[fontStartIndex] = `${fontStartIndex} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj`;
-  objects[fontStartIndex + 1] = `${fontStartIndex + 1} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj`;
+  objects[fontStartIndex] = `${fontStartIndex} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Arial /Encoding /WinAnsiEncoding >>\nendobj`;
+  objects[fontStartIndex + 1] = `${fontStartIndex + 1} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Arial-Bold /Encoding /WinAnsiEncoding >>\nendobj`;
 
   let pdf = "%PDF-1.4\n";
   const offsets: number[] = new Array(objects.length).fill(0);
@@ -308,6 +332,7 @@ export function TimingDashboard({
   const { toast } = useToast();
   const { role } = useContext(AppContext);
   const isAdmin = role === "admin";
+  const isTimer = role === "timer";
   const [mode, setMode] = useState<TimingMode>("general");
   const [startingGroupKey, setStartingGroupKey] = useState<string | null>(null);
   const [manualBib, setManualBib] = useState("");
@@ -319,12 +344,62 @@ export function TimingDashboard({
   >({});
   const [duplicateArrivals, setDuplicateArrivals] = useState<ArrivalEntry[]>([]);
   const [duplicateCounters, setDuplicateCounters] = useState<Record<string, number>>({});
+  const [isFinalizing, setIsFinalizing] = useState(false);
   const raceName = activeRace?.name ?? "Carrera";
+  const [viewerTab, setViewerTab] = useState<"general" | "categories" | "special">("general");
+  const [finalizedWindow, setFinalizedWindow] = useState<{ start: number | null; end: number | null }>(() => ({
+    start: activeRace?.raceStartTime ?? null,
+    end: activeRace?.raceEndTime ?? null,
+  }));
+  const raceInstances = useMemo(() => activeRace?.instances ?? [], [activeRace]);
+  const isRaceFinalized = useMemo(
+    () => Boolean(activeRace?.finalized || activeRace?.raceEndTime || finalizedWindow.end),
+    [activeRace?.finalized, activeRace?.raceEndTime, finalizedWindow.end]
+  );
+  const canControlTiming = useMemo(() => (isAdmin || isTimer) && !isRaceFinalized, [isAdmin, isTimer, isRaceFinalized]);
+  const [activeInstanceId, setActiveInstanceId] = useState<string | null>(() =>
+    activeRace?.isMultiStage ? raceInstances[0]?.id ?? null : null
+  );
+  const [finalizeDialogOpen, setFinalizeDialogOpen] = useState(false);
+  const [finalizeAggregationMode, setFinalizeAggregationMode] = useState<"time" | "points">(
+    activeRace?.evaluationMethod ?? "time"
+  );
+  const [selectedAggregationInstances, setSelectedAggregationInstances] = useState<string[]>(() =>
+    raceInstances.filter((instance) => instance.includeInResult).map((instance) => instance.id)
+  );
+  const [selectedAggregationSessions, setSelectedAggregationSessions] = useState<string[]>(() =>
+    (activeRace?.sessions ?? []).map((session) => session.id)
+  );
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 500);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (!activeRace?.isMultiStage) {
+      setActiveInstanceId(null);
+      return;
+    }
+    setActiveInstanceId((current) => {
+      if (current && raceInstances.some((instance) => instance.id === current)) {
+        return current;
+      }
+      return raceInstances[0]?.id ?? null;
+    });
+  }, [activeRace?.isMultiStage, raceInstances]);
+
+  useEffect(() => {
+    setFinalizeAggregationMode(activeRace?.evaluationMethod ?? "time");
+    setSelectedAggregationInstances(
+      raceInstances.filter((instance) => instance.includeInResult).map((instance) => instance.id)
+    );
+    setSelectedAggregationSessions((activeRace?.sessions ?? []).map((session) => session.id));
+  }, [activeRace?.evaluationMethod, activeRace?.sessions, raceInstances]);
+
+  useEffect(() => {
+    setFinalizedWindow({ start: activeRace?.raceStartTime ?? null, end: activeRace?.raceEndTime ?? null });
+  }, [activeRace?.raceEndTime, activeRace?.raceStartTime]);
 
   const categoriesMap = useMemo(() => {
     return categories.reduce((acc, category) => {
@@ -333,20 +408,104 @@ export function TimingDashboard({
     }, {} as Record<string, string>);
   }, [categories]);
 
+  const baseParticipantMap = useMemo(
+    () =>
+      participants.reduce((acc, participant) => {
+        acc[participant.id] = participant;
+        return acc;
+      }, {} as Record<string, Participant>),
+    [participants]
+  );
+
+  const baseParticipants = useMemo(
+    () => participants.filter((participant) => !participant.replacedById),
+    [participants]
+  );
+
+  const activeParticipants = useMemo(() => {
+    if (!activeRace?.isMultiStage || !activeInstanceId) {
+      return baseParticipants;
+    }
+
+    return baseParticipants.map((participant) => {
+      const instanceTime = participant.instanceTimes?.[activeInstanceId];
+      if (!instanceTime) return participant;
+      return {
+        ...participant,
+        startTime: instanceTime.startTime ?? null,
+        finishTime: instanceTime.finishTime ?? null,
+      };
+    });
+  }, [activeInstanceId, activeRace?.isMultiStage, baseParticipants]);
+
   const getGroupStart = (groupParticipants: Participant[]) => {
     const startTimes = groupParticipants.map((p) => p.startTime).filter(Boolean) as number[];
     if (startTimes.length === 0) return null;
     return Math.min(...startTimes);
   };
 
+  const includedInstanceIds = useMemo(() => {
+    if (!activeRace?.isMultiStage) return [] as string[];
+    if (activeRace.finalAggregation?.instanceIds?.length) {
+      return activeRace.finalAggregation.instanceIds;
+    }
+    const fromInstances = raceInstances
+      .filter((instance) => instance.includeInResult)
+      .map((instance) => instance.id);
+
+    if (activeRace.includeInstancesInResult) {
+      return fromInstances.length > 0 ? fromInstances : raceInstances.map((instance) => instance.id);
+    }
+
+    return fromInstances;
+  }, [activeRace?.finalAggregation?.instanceIds, activeRace?.includeInstancesInResult, activeRace?.isMultiStage, raceInstances]);
+
+  const getTotalDuration = useCallback(
+    (participantId: string) => {
+      if (includedInstanceIds.length === 0) return null;
+      if (activeRace?.finalAggregation?.aggregateBy === "points") return null;
+      const participant = baseParticipantMap[participantId];
+      if (!participant) return null;
+      const times = participant.instanceTimes ?? {};
+      let total = 0;
+      for (const instanceId of includedInstanceIds) {
+        const record = times[instanceId];
+        if (!record?.startTime || !record?.finishTime) return null;
+        total += record.finishTime - record.startTime;
+      }
+      return total;
+    },
+    [activeRace?.finalAggregation?.aggregateBy, baseParticipantMap, includedInstanceIds]
+  );
+
+  const activeInstance = useMemo(
+    () => raceInstances.find((instance) => instance.id === activeInstanceId) ?? null,
+    [activeInstanceId, raceInstances]
+  );
+
+  const includedInstanceNames = useMemo(() => {
+    if (includedInstanceIds.length === 0) return "No se suman instancias";
+    const names = raceInstances
+      .filter((instance) => includedInstanceIds.includes(instance.id))
+      .map((instance) => instance.name);
+    return names.length > 0 ? names.join(" · ") : "Instancias sin nombre";
+  }, [includedInstanceIds, raceInstances]);
+
+  const aggregationMode = useMemo(
+    () => activeRace?.finalAggregation?.aggregateBy ?? activeRace?.evaluationMethod ?? "time",
+    [activeRace?.evaluationMethod, activeRace?.finalAggregation?.aggregateBy]
+  );
+  const isPointsAggregation = aggregationMode === "points";
+  const aggregationSelectionActive = Boolean(activeRace?.finalAggregation?.instanceIds?.length);
+
   const resolveParticipantsForGroup = (group: TimingGroup) => {
     if (mode === "general") {
-      return participants;
+      return activeParticipants;
     }
     if (mode === "distance") {
-      return participants.filter((participant) => participant.distance === group.actionGroupId);
+      return activeParticipants.filter((participant) => participant.distance === group.actionGroupId);
     }
-    return participants.filter((participant) => {
+    return activeParticipants.filter((participant) => {
       if (!group.actionGroupId) {
         return !participant.categoryId;
       }
@@ -355,16 +514,16 @@ export function TimingDashboard({
   };
 
   const groups = useMemo<TimingGroup[]>(() => {
-    if (participants.length === 0) return [];
+    if (activeParticipants.length === 0) return [];
 
     if (mode === "general") {
       return [
         {
           key: "general",
           label: "Cronómetro general",
-          participantCount: participants.length,
-          finishedCount: participants.filter((p) => p.finishTime).length,
-          startTime: getGroupStart(participants),
+          participantCount: activeParticipants.length,
+          finishedCount: activeParticipants.filter((p) => p.finishTime).length,
+          startTime: getGroupStart(activeParticipants),
           actionGroupId: null,
         },
       ];
@@ -372,7 +531,7 @@ export function TimingDashboard({
 
     if (mode === "distance") {
       const map = new Map<string, Participant[]>();
-      participants.forEach((participant) => {
+      activeParticipants.forEach((participant) => {
         const current = map.get(participant.distance) ?? [];
         current.push(participant);
         map.set(participant.distance, current);
@@ -391,7 +550,7 @@ export function TimingDashboard({
     }
 
     const map = new Map<string, { label: string; members: Participant[]; actionGroupId: string | null }>();
-    participants.forEach((participant) => {
+    activeParticipants.forEach((participant) => {
       const categoryId = participant.categoryId ?? "__sin_categoria__";
       const label = participant.categoryId ? categoriesMap[participant.categoryId] ?? "Sin categoría" : "Sin categoría";
       if (!map.has(categoryId)) {
@@ -410,22 +569,53 @@ export function TimingDashboard({
         startTime: getGroupStart(value.members),
         actionGroupId: value.actionGroupId,
       }));
-  }, [mode, participants, categoriesMap]);
+  }, [mode, activeParticipants, categoriesMap]);
 
-  useEffect(() => {
-    setStoppedGroups((prev) => {
+  const sanitizeStoppedGroups = useCallback(
+    (source: Record<string, { pausedAt: number; referenceStart: number }>) => {
       let changed = false;
-      const next = { ...prev };
-      Object.entries(prev).forEach(([key, value]) => {
+      const next = { ...source };
+      Object.entries(source).forEach(([key, value]) => {
         const group = groups.find((g) => g.key === key);
         if (!group || !group.startTime || group.startTime !== value.referenceStart) {
           delete next[key];
           changed = true;
         }
       });
-      return changed ? next : prev;
-    });
-  }, [groups]);
+      return changed ? next : source;
+    },
+    [groups]
+  );
+
+  const pausedStorageKey = useMemo(
+    () => `timing-paused:${raceId}:${mode}:${activeInstanceId ?? "single"}`,
+    [activeInstanceId, mode, raceId]
+  );
+
+  useEffect(() => {
+    setStoppedGroups((prev) => sanitizeStoppedGroups(prev));
+  }, [sanitizeStoppedGroups]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = localStorage.getItem(pausedStorageKey);
+    if (!stored) {
+      setStoppedGroups({});
+      return;
+    }
+    try {
+      const parsed = JSON.parse(stored) as Record<string, { pausedAt: number; referenceStart: number }>;
+      setStoppedGroups(sanitizeStoppedGroups(parsed));
+    } catch (error) {
+      console.error("Error restoring paused timers", error);
+      setStoppedGroups({});
+    }
+  }, [pausedStorageKey, sanitizeStoppedGroups]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem(pausedStorageKey, JSON.stringify(stoppedGroups));
+  }, [pausedStorageKey, stoppedGroups]);
 
   const startTimeLookup = useMemo(() => {
     const lookup: Record<string, number | null> = {};
@@ -435,8 +625,27 @@ export function TimingDashboard({
     return lookup;
   }, [groups]);
 
+  const participantMapById = useMemo(() => {
+    return activeParticipants.reduce((acc, participant) => {
+      acc[participant.id] = participant;
+      return acc;
+    }, {} as Record<string, Participant>);
+  }, [activeParticipants]);
+
+  const getAggregatedValue = useCallback(
+    (participantId: string) => {
+      const participant = participantMapById[participantId];
+      if (!participant) return null;
+      if (participant.aggregatedType === "points" || participant.aggregatedType === "time") {
+        return participant.aggregatedValue ?? null;
+      }
+      return null;
+    },
+    [participantMapById]
+  );
+
   const finisherEntries = useMemo<ArrivalEntry[]>(() => {
-    return participants
+    return activeParticipants
       .filter((participant) => participant.finishTime && participant.startTime)
       .map((participant) => ({
         id: participant.id,
@@ -450,19 +659,52 @@ export function TimingDashboard({
         gender: participant.gender,
         startTime: participant.startTime!,
         finishTime: participant.finishTime!,
+        isSpecial: participant.isSpecial ?? false,
+        totalTime: getTotalDuration(participant.id),
+        instanceId: activeInstanceId ?? null,
       }));
-  }, [participants]);
+  }, [activeInstanceId, activeParticipants, getTotalDuration]);
 
-  const participantMapById = useMemo(() => {
-    return participants.reduce((acc, participant) => {
-      acc[participant.id] = participant;
-      return acc;
-    }, {} as Record<string, Participant>);
-  }, [participants]);
+  const getElapsedTime = (arrival: ArrivalEntry) => arrival.finishTime - arrival.startTime;
+  const getEffectiveDuration = (arrival: ArrivalEntry) => arrival.totalTime ?? getElapsedTime(arrival);
+
+  const getResultValue = useCallback(
+    (arrival: ArrivalEntry) => {
+      if (aggregationSelectionActive && isPointsAggregation) {
+        const points = getAggregatedValue(arrival.participantId);
+        return points !== null && points !== undefined ? points : null;
+      }
+      return getEffectiveDuration(arrival);
+    },
+    [aggregationSelectionActive, getAggregatedValue, getEffectiveDuration, isPointsAggregation]
+  );
+
+  const renderResultValue = useCallback(
+    (arrival: ArrivalEntry) => {
+      const value = getResultValue(arrival);
+      if (aggregationSelectionActive && isPointsAggregation) {
+        return value === null || value === undefined ? "-" : Number(value).toFixed(2);
+      }
+      return formatElapsedTime(value ?? 0);
+    },
+    [aggregationSelectionActive, getResultValue, isPointsAggregation]
+  );
 
   const finishers = useMemo(() => {
-    return [...finisherEntries, ...duplicateArrivals].sort((a, b) => a.finishTime - b.finishTime);
-  }, [finisherEntries, duplicateArrivals]);
+    const comparer = (a: ArrivalEntry, b: ArrivalEntry) => {
+      if (isPointsAggregation && aggregationSelectionActive) {
+        const pointsA = getAggregatedValue(a.participantId) ?? 0;
+        const pointsB = getAggregatedValue(b.participantId) ?? 0;
+        return pointsB - pointsA;
+      }
+      return getEffectiveDuration(a) - getEffectiveDuration(b);
+    };
+    return [...finisherEntries, ...duplicateArrivals].sort(comparer);
+  }, [aggregationSelectionActive, duplicateArrivals, finisherEntries, getAggregatedValue, getEffectiveDuration, isPointsAggregation]);
+
+  const specialFinishers = useMemo(() => {
+    return finishers.filter((arrival) => participantMapById[arrival.participantId]?.isSpecial);
+  }, [finishers, participantMapById]);
 
   const categoryArrivals = useMemo(() => {
     const map = new Map<string, { label: string; members: ArrivalEntry[] }>();
@@ -478,6 +720,15 @@ export function TimingDashboard({
       .sort((a, b) => a[1].label.localeCompare(b[1].label))
       .map(([key, value]) => ({ key, ...value }));
   }, [finishers, categoriesMap]);
+
+  const categorySpecialArrivals = useMemo(() => {
+    return categoryArrivals
+      .map((category) => ({
+        ...category,
+        members: category.members.filter((arrival) => participantMapById[arrival.participantId]?.isSpecial),
+      }))
+      .filter((category) => category.members.length > 0);
+  }, [categoryArrivals, participantMapById]);
 
   const genderArrivals = useMemo(() => {
     const map = new Map<Participant["gender"], ArrivalEntry[]>();
@@ -498,6 +749,32 @@ export function TimingDashboard({
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [finishers]);
 
+  const genderSpecialArrivals = useMemo(() => {
+    return genderArrivals
+      .map((entry) => ({
+        ...entry,
+        members: entry.members.filter((arrival) => participantMapById[arrival.participantId]?.isSpecial),
+      }))
+      .filter((entry) => entry.members.length > 0);
+  }, [genderArrivals, participantMapById]);
+
+  const showTotalColumn = Boolean(activeRace?.isMultiStage && includedInstanceIds.length > 0);
+  const resultColumnLabel = aggregationSelectionActive && isPointsAggregation ? "Puntos" : "Tiempo";
+  const totalColumnLabel = aggregationSelectionActive
+    ? isPointsAggregation
+      ? "Puntos totales"
+      : "Total acumulado"
+    : "Total acumulado";
+  const currentInstanceLabel = activeInstance?.name ?? (activeRace?.isMultiStage ? "Selecciona instancia" : "General");
+  const hasAggregationOptions = useMemo(
+    () =>
+      Boolean(
+        (activeRace?.isMultiStage && raceInstances.length > 0) ||
+          (activeRace?.timingAggregation === "multiple" && (activeRace?.sessions?.length ?? 0) > 0)
+      ),
+    [activeRace?.isMultiStage, activeRace?.sessions?.length, activeRace?.timingAggregation, raceInstances.length]
+  );
+
   const getGroupKeyForParticipant = (participant: Participant, currentMode: TimingMode) => {
     if (currentMode === "general") return "general";
     if (currentMode === "distance") return `distance:${participant.distance}`;
@@ -506,7 +783,15 @@ export function TimingDashboard({
   };
 
   const handleStartGroup = async (group: TimingGroup) => {
-    if (!isAdmin) return;
+    if (!canControlTiming) return;
+    if (isRaceFinalized) {
+      toast({
+        variant: "destructive",
+        title: "Carrera finalizada",
+        description: "Resetea la carrera para volver a iniciar los cronómetros.",
+      });
+      return;
+    }
     if (
       group.startTime &&
       !stoppedGroups[group.key] &&
@@ -516,7 +801,7 @@ export function TimingDashboard({
     }
     setStartingGroupKey(group.key);
     try {
-      await startTimingGroup(raceId, mode, group.actionGroupId);
+      await startTimingGroup(raceId, mode, group.actionGroupId, activeInstanceId);
       setStoppedGroups((prev) => {
         if (!prev[group.key]) return prev;
         const next = { ...prev };
@@ -529,13 +814,15 @@ export function TimingDashboard({
       });
     } catch (error) {
       console.error(error);
-      toast({ variant: "destructive", title: "Error", description: "No se pudo iniciar el cronómetro seleccionado." });
+      const message = error instanceof Error ? error.message : "No se pudo iniciar el cronómetro seleccionado.";
+      toast({ variant: "destructive", title: "Error", description: message });
     } finally {
       setStartingGroupKey(null);
     }
   };
 
   const handleStopGroup = (group: TimingGroup) => {
+    if (!canControlTiming) return;
     if (!group.startTime) return;
     setStoppedGroups((prev) => ({
       ...prev,
@@ -544,6 +831,7 @@ export function TimingDashboard({
   };
 
   const handleResetGroup = async (group: TimingGroup) => {
+    if (!isAdmin) return;
     if (!group.startTime) return;
     const confirmReset = window.confirm(
       "Reseteará el cronómetro y limpiará las llegadas registradas para este grupo. ¿Deseas continuar?"
@@ -553,7 +841,7 @@ export function TimingDashboard({
     }
     setStartingGroupKey(group.key);
     try {
-      await resetTimingGroup(raceId, mode, group.actionGroupId);
+      await resetTimingGroup(raceId, mode, group.actionGroupId, activeInstanceId);
       setStoppedGroups((prev) => {
         const next = { ...prev };
         delete next[group.key];
@@ -586,9 +874,10 @@ export function TimingDashboard({
 
   const handleManualCapture = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!canControlTiming) return;
     if (!manualBib.trim()) return;
     const bib = manualBib.trim();
-    const participant = participants.find((p) => p.bibNumber === bib);
+    const participant = activeParticipants.find((p) => p.bibNumber === bib);
     if (!participant) {
       toast({ variant: "destructive", title: "Dorsal no encontrado", description: `No existe el dorsal ${bib}.` });
       setManualBib("");
@@ -627,7 +916,10 @@ export function TimingDashboard({
           gender: participant.gender,
           startTime: effectiveStartTime,
           finishTime,
+          isSpecial: participant.isSpecial ?? false,
           isDuplicate: true,
+          totalTime: getTotalDuration(participant.id),
+          instanceId: activeInstanceId ?? null,
         };
         setDuplicateArrivals((prev) => [...prev, duplicateEntry]);
         setDuplicateCounters((prev) => ({ ...prev, [bib]: nextIndex + 1 }));
@@ -639,7 +931,15 @@ export function TimingDashboard({
         return;
       }
 
-      await updateParticipantTime(participant.id, effectiveStartTime, finishTime);
+      let nextInstanceId: string | null = null;
+      if (activeRace?.isMultiStage && activeInstanceId) {
+        const currentIndex = raceInstances.findIndex((instance) => instance.id === activeInstanceId);
+        if (currentIndex >= 0 && currentIndex < raceInstances.length - 1) {
+          nextInstanceId = raceInstances[currentIndex + 1]?.id ?? null;
+        }
+      }
+
+      await updateParticipantTime(participant.id, effectiveStartTime, finishTime, activeInstanceId, nextInstanceId);
       toast({
         title: "Tiempo registrado",
         description: `Se registró la llegada del dorsal ${bib}.`,
@@ -653,6 +953,62 @@ export function TimingDashboard({
     }
   };
 
+  const clearLocalChronometers = useCallback(() => {
+    setStoppedGroups({});
+    if (typeof window !== "undefined") {
+      ["general", "distance", "category"].forEach((storedMode) => {
+        const key = `timing-paused:${raceId}:${storedMode}:${activeInstanceId ?? "single"}`;
+        localStorage.removeItem(key);
+      });
+    }
+  }, [activeInstanceId, raceId]);
+
+  const handleFinalizeRace = async (options?: { aggregateBy?: "time" | "points"; instanceIds?: string[]; sessionIds?: string[] }) => {
+    if (!isAdmin) return;
+    const confirmFinish = window.confirm(
+      "Esto detendrá todos los cronómetros y guardará el horario de fin. Las clasificaciones y tiempos se mantendrán. ¿Deseas continuar?"
+    );
+    if (!confirmFinish) return;
+    setIsFinalizing(true);
+    try {
+      const result = await finalizeRaceTiming(raceId, options);
+      setFinalizedWindow({ start: result.raceStartTime ?? null, end: result.raceEndTime ?? null });
+      clearLocalChronometers();
+      toast({
+        title: "Carrera finalizada",
+        description: "Se detuvieron los cronómetros y se guardó la ventana total de la carrera.",
+      });
+    } catch (error) {
+      console.error(error);
+      toast({ variant: "destructive", title: "Error", description: "No se pudo finalizar la carrera." });
+    } finally {
+      setIsFinalizing(false);
+      setFinalizeDialogOpen(false);
+    }
+  };
+
+  const handleResetRace = async () => {
+    if (!isAdmin) return;
+    const confirmReset = window.confirm(
+      "Esto borrará todas las llegadas, tiempos y reiniciará los cronómetros a 0. ¿Deseas continuar?"
+    );
+    if (!confirmReset) return;
+    try {
+      await resetRaceTiming(raceId);
+      clearLocalChronometers();
+      setDuplicateArrivals([]);
+      setDuplicateCounters({});
+      setFinalizedWindow({ start: null, end: null });
+      toast({
+        title: "Clasificaciones reseteadas",
+        description: "Se limpiaron tiempos, clasificaciones y cronómetros de la carrera.",
+      });
+    } catch (error) {
+      console.error(error);
+      toast({ variant: "destructive", title: "Error", description: "No se pudo resetear la carrera." });
+    }
+  };
+
   const exportGeneral = (format: "xlsx" | "pdf") => {
     if (finishers.length === 0) {
       toast({ title: "Sin datos", description: "Todavía no hay llegadas para exportar." });
@@ -662,8 +1018,8 @@ export function TimingDashboard({
     const rows = finishers.map((arrival, index) => {
       const participant = participantMapById[arrival.participantId];
       const categoryLabel = arrival.categoryId ? categoriesMap[arrival.categoryId] || "Sin categoría" : "Sin categoría";
-      const elapsed = formatElapsedTime(arrival.finishTime - arrival.startTime);
-      return {
+      const elapsed = formatElapsedTime(getElapsedTime(arrival));
+      const baseRow: Record<string, string | number> = {
         "Posición": index + 1,
         Dorsal: arrival.displayBib,
         Nombre: participant?.name ?? arrival.name,
@@ -675,36 +1031,102 @@ export function TimingDashboard({
         Ciudad: participant?.city ?? "",
         Provincia: participant?.province ?? "",
         País: participant?.country ?? "",
+        Especial: participant?.isSpecial ? "Sí" : "No",
         "Categoría especial": participant?.isSpecial ? "Sí" : "No",
         "Hora de inicio": participant?.startTime ? new Date(participant.startTime).toLocaleString() : "",
         "Hora de llegada": new Date(arrival.finishTime).toLocaleString(),
         Tiempo: elapsed,
       };
+
+      if (showTotalColumn) {
+        baseRow["Total acumulado"] = arrival.totalTime ? formatElapsedTime(arrival.totalTime) : "";
+      }
+
+      return baseRow;
     });
 
     if (format === "xlsx") {
       const workbook = XLSX.utils.book_new();
       const worksheet = XLSX.utils.json_to_sheet(rows);
       XLSX.utils.book_append_sheet(workbook, worksheet, "General");
+      if (specialFinishers.length > 0) {
+        const specialRows = specialFinishers.map((arrival, index) => {
+          const participant = participantMapById[arrival.participantId];
+          const categoryLabel = arrival.categoryId ? categoriesMap[arrival.categoryId] || "Sin categoría" : "Sin categoría";
+          return {
+            "Posición": index + 1,
+            Dorsal: arrival.displayBib,
+            Nombre: participant?.name ?? arrival.name,
+            Apellido: participant?.surname ?? arrival.surname,
+            Género: participant ? genderLabels[participant.gender] : "",
+            Categoría: categoryLabel,
+            Distancia: arrival.distance,
+            Tiempo: formatElapsedTime(getElapsedTime(arrival)),
+            ...(showTotalColumn
+              ? { "Total acumulado": arrival.totalTime ? formatElapsedTime(arrival.totalTime) : "" }
+              : {}),
+          };
+        });
+        const specialSheet = XLSX.utils.json_to_sheet(specialRows);
+        XLSX.utils.book_append_sheet(workbook, specialSheet, "Especiales");
+      }
       XLSX.writeFile(workbook, `llegadas_general_${timestamp}.xlsx`);
       return;
     }
 
-    const pdf = buildTablesPdf("Llegadas generales", [
+    const generalHeaders = showTotalColumn
+      ? ["#", "Dorsal", "Nombre completo", "Especial", "Categoría", "Distancia", "Tiempo", "Total"]
+      : ["#", "Dorsal", "Nombre completo", "Especial", "Categoría", "Distancia", "Tiempo"];
+    const generalWeights = showTotalColumn ? [0.5, 0.8, 1.3, 0.8, 1, 0.8, 0.7, 0.9] : [0.5, 0.8, 1.3, 0.8, 1, 0.8, 0.7];
+
+    const pdfSections: PdfSection[] = [
       {
         title: "Clasificación general",
-        headers: ["#", "Dorsal", "Nombre completo", "Categoría", "Distancia", "Tiempo"],
-        columnWeights: [0.5, 0.8, 1.4, 1.1, 0.8, 0.7],
-        rows: rows.map((row) => [
-          row["Posición"],
-          row.Dorsal,
-          `${row.Nombre} ${row.Apellido}`.trim(),
-          row["Categoría"],
-          String(row.Distancia).toUpperCase(),
-          row.Tiempo,
-        ]),
+        headers: generalHeaders,
+        columnWeights: generalWeights,
+        rows: rows.map((row) => {
+          const base = [
+            row["Posición"],
+            row.Dorsal,
+            `${row.Nombre} ${row.Apellido}`.trim(),
+            row.Especial,
+            row["Categoría"],
+            String(row.Distancia).toUpperCase(),
+            row.Tiempo,
+          ];
+          if (showTotalColumn) {
+            base.push((row as Record<string, string>)["Total acumulado"] ?? "-");
+          }
+          return base;
+        }),
       },
-    ]);
+    ];
+
+    if (specialFinishers.length > 0) {
+      pdfSections.push({
+        title: "Clasificación especial",
+        headers: showTotalColumn
+          ? ["#", "Dorsal", "Nombre", "Categoría", "Distancia", "Tiempo", "Total"]
+          : ["#", "Dorsal", "Nombre", "Categoría", "Distancia", "Tiempo"],
+        columnWeights: showTotalColumn ? [0.5, 0.8, 1.4, 1, 0.7, 0.7, 0.9] : [0.5, 0.8, 1.6, 1.1, 0.8, 0.7],
+        rows: specialFinishers.map((arrival, index) => {
+          const base = [
+            index + 1,
+            arrival.displayBib,
+            `${arrival.name} ${arrival.surname}`,
+            arrival.categoryId ? categoriesMap[arrival.categoryId] || "Sin categoría" : "Sin categoría",
+            arrival.distance.toUpperCase(),
+            formatElapsedTime(getElapsedTime(arrival)),
+          ];
+          if (showTotalColumn) {
+            base.push(arrival.totalTime ? formatElapsedTime(arrival.totalTime) : "-");
+          }
+          return base;
+        }),
+      });
+    }
+
+    const pdf = buildTablesPdf("Llegadas generales", pdfSections);
     downloadBlob(pdf, `llegadas_general_${timestamp}.pdf`);
   };
 
@@ -721,31 +1143,65 @@ export function TimingDashboard({
           "Posición": index + 1,
           Dorsal: arrival.displayBib,
           Nombre: `${arrival.name} ${arrival.surname}`,
+          Especial: participantMapById[arrival.participantId]?.isSpecial ? "Sí" : "No",
           Distancia: arrival.distance,
-          Tiempo: formatElapsedTime(arrival.finishTime - arrival.startTime),
+          Tiempo: formatElapsedTime(getElapsedTime(arrival)),
         }));
         const worksheet = XLSX.utils.json_to_sheet(
           sheetRows.length > 0 ? sheetRows : [{ Aviso: "Sin llegadas registradas" }]
         );
         XLSX.utils.book_append_sheet(workbook, worksheet, sanitizeSheetName(category.label));
       });
+
+      if (categorySpecialArrivals.length > 0) {
+        categorySpecialArrivals.forEach((category) => {
+          const sheetRows = category.members.map((arrival, index) => ({
+            "Posición": index + 1,
+            Dorsal: arrival.displayBib,
+            Nombre: `${arrival.name} ${arrival.surname}`,
+            Tiempo: formatElapsedTime(getElapsedTime(arrival)),
+          }));
+          const worksheet = XLSX.utils.json_to_sheet(
+            sheetRows.length > 0 ? sheetRows : [{ Aviso: "Sin llegadas registradas" }]
+          );
+          XLSX.utils.book_append_sheet(
+            workbook,
+            worksheet,
+            sanitizeSheetName(`Especiales - ${category.label}`)
+          );
+        });
+      }
       XLSX.writeFile(workbook, `clasificacion_categorias_${timestamp}.xlsx`);
       return;
     }
 
     const pdf = buildTablesPdf(
       "Clasificación por categoría",
-      categoryArrivals.map((category) => ({
-        title: category.label,
-        headers: ["#", "Dorsal", "Nombre", "Tiempo"],
-        columnWeights: [0.5, 0.7, 1.8, 0.7],
-        rows: category.members.map((arrival, index) => [
-          index + 1,
-          arrival.displayBib,
-          `${arrival.name} ${arrival.surname}`,
-          formatElapsedTime(arrival.finishTime - arrival.startTime),
-        ]),
-      }))
+      [
+        ...categoryArrivals.map((category) => ({
+          title: category.label,
+          headers: ["#", "Dorsal", "Nombre", "Especial", "Tiempo"],
+          columnWeights: [0.5, 0.7, 1.6, 0.7, 0.7],
+          rows: category.members.map((arrival, index) => [
+            index + 1,
+            arrival.displayBib,
+            `${arrival.name} ${arrival.surname}`,
+            participantMapById[arrival.participantId]?.isSpecial ? "Sí" : "No",
+            formatElapsedTime(getElapsedTime(arrival)),
+          ]),
+        })),
+        ...categorySpecialArrivals.map((category) => ({
+          title: `Especiales · ${category.label}`,
+          headers: ["#", "Dorsal", "Nombre", "Tiempo"],
+          columnWeights: [0.5, 0.7, 1.8, 0.7],
+          rows: category.members.map((arrival, index) => [
+            index + 1,
+            arrival.displayBib,
+            `${arrival.name} ${arrival.surname}`,
+            formatElapsedTime(getElapsedTime(arrival)),
+          ]),
+        })),
+      ]
     );
     downloadBlob(pdf, `clasificacion_categorias_${timestamp}.pdf`);
   };
@@ -764,139 +1220,278 @@ export function TimingDashboard({
           "Posición": index + 1,
           Dorsal: arrival.displayBib,
           Nombre: `${arrival.name} ${arrival.surname}`,
+          Especial: participantMapById[arrival.participantId]?.isSpecial ? "Sí" : "No",
           Categoría: arrival.categoryId ? categoriesMap[arrival.categoryId] ?? "Sin categoría" : "Sin categoría",
           Distancia: arrival.distance,
-          Tiempo: formatElapsedTime(arrival.finishTime - arrival.startTime),
+          Tiempo: formatElapsedTime(getElapsedTime(arrival)),
         }));
         const worksheet = XLSX.utils.json_to_sheet(
           sheetRows.length > 0 ? sheetRows : [{ Aviso: "Sin llegadas registradas" }]
         );
         XLSX.utils.book_append_sheet(workbook, worksheet, sanitizeSheetName(genderGroup.label));
       });
+
+      if (genderSpecialArrivals.length > 0) {
+        genderSpecialArrivals.forEach((genderGroup) => {
+          const sheetRows = genderGroup.members.map((arrival, index) => ({
+            "Posición": index + 1,
+            Dorsal: arrival.displayBib,
+            Nombre: `${arrival.name} ${arrival.surname}`,
+            Categoría: arrival.categoryId ? categoriesMap[arrival.categoryId] ?? "Sin categoría" : "Sin categoría",
+            Distancia: arrival.distance,
+            Tiempo: formatElapsedTime(getElapsedTime(arrival)),
+          }));
+          const worksheet = XLSX.utils.json_to_sheet(
+            sheetRows.length > 0 ? sheetRows : [{ Aviso: "Sin llegadas registradas" }]
+          );
+          XLSX.utils.book_append_sheet(workbook, worksheet, sanitizeSheetName(`Especiales - ${genderGroup.label}`));
+        });
+      }
       XLSX.writeFile(workbook, `clasificacion_genero_${timestamp}.xlsx`);
       return;
     }
 
     const pdf = buildTablesPdf(
       "Clasificación general por sexo",
-      genderArrivals.map((genderGroup) => ({
-        title: genderGroup.label,
-        headers: ["#", "Dorsal", "Nombre", "Categoría", "Distancia", "Tiempo"],
-        columnWeights: [0.5, 0.7, 1.6, 1.2, 0.8, 0.7],
-        rows: genderGroup.members.map((arrival, index) => [
-          index + 1,
-          arrival.displayBib,
-          `${arrival.name} ${arrival.surname}`,
-          arrival.categoryId ? categoriesMap[arrival.categoryId] ?? "Sin categoría" : "Sin categoría",
-          arrival.distance.toUpperCase(),
-          formatElapsedTime(arrival.finishTime - arrival.startTime),
-        ]),
-      }))
+      [
+        ...genderArrivals.map((genderGroup) => ({
+          title: genderGroup.label,
+          headers: ["#", "Dorsal", "Nombre", "Especial", "Categoría", "Distancia", "Tiempo"],
+          columnWeights: [0.5, 0.7, 1.4, 0.8, 1, 0.8, 0.7],
+          rows: genderGroup.members.map((arrival, index) => [
+            index + 1,
+            arrival.displayBib,
+            `${arrival.name} ${arrival.surname}`,
+            participantMapById[arrival.participantId]?.isSpecial ? "Sí" : "No",
+            arrival.categoryId ? categoriesMap[arrival.categoryId] ?? "Sin categoría" : "Sin categoría",
+            arrival.distance.toUpperCase(),
+            formatElapsedTime(getElapsedTime(arrival)),
+          ]),
+        })),
+        ...genderSpecialArrivals.map((genderGroup) => ({
+          title: `Especiales · ${genderGroup.label}`,
+          headers: ["#", "Dorsal", "Nombre", "Categoría", "Distancia", "Tiempo"],
+          columnWeights: [0.5, 0.7, 1.6, 1.1, 0.8, 0.7],
+          rows: genderGroup.members.map((arrival, index) => [
+            index + 1,
+            arrival.displayBib,
+            `${arrival.name} ${arrival.surname}`,
+            arrival.categoryId ? categoriesMap[arrival.categoryId] ?? "Sin categoría" : "Sin categoría",
+            arrival.distance.toUpperCase(),
+            formatElapsedTime(getElapsedTime(arrival)),
+          ]),
+        })),
+      ]
     );
     downloadBlob(pdf, `clasificacion_genero_${timestamp}.pdf`);
   };
+
+  const showGeneralSections = isAdmin || viewerTab === "general";
+  const showCategorySections = isAdmin || viewerTab === "categories";
+  const showSpecialSections = isAdmin || viewerTab === "special";
 
   return (
     <div className="space-y-6">
       <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
         Cronometrando: <span className="font-semibold text-foreground">{raceName}</span>
       </div>
-      <Card>
-        <CardHeader>
-          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <CardTitle>Modo de largada</CardTitle>
-            {isAdmin && (
+      {activeRace?.isMultiStage && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Instancia en medición</CardTitle>
+            <CardDescription>
+              Selecciona la etapa que estás midiendo. El total se calculará con las instancias marcadas
+              para sumar.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 md:grid-cols-[320px_1fr] md:items-center">
+            <div className="space-y-2">
+              <Label>Instancia actual</Label>
+              <Select value={activeInstanceId ?? ""} onValueChange={(value) => setActiveInstanceId(value)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecciona una instancia" />
+                </SelectTrigger>
+                <SelectContent>
+                  {raceInstances.map((instance) => (
+                    <SelectItem key={instance.id} value={instance.id}>
+                      {instance.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1 text-sm text-muted-foreground">
+              <p>
+                Instancia seleccionada: <span className="font-semibold text-foreground">{currentInstanceLabel}</span>
+              </p>
+              <p>
+                Instancias que suman al resultado: <span className="font-semibold text-foreground">{includedInstanceNames}</span>
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      {isAdmin && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Finalizar o reiniciar la carrera</CardTitle>
+            <CardDescription>
+              Detén todos los cronómetros al terminar la prueba o reinicia los datos para comenzar de nuevo.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 md:grid-cols-2 md:items-center">
+            <div className="space-y-2 text-sm text-muted-foreground">
+              <p>
+                Inicio registrado: {finalizedWindow.start ? new Date(finalizedWindow.start).toLocaleString() : "-"}
+              </p>
+              <p>
+                Fin registrado: {finalizedWindow.end ? new Date(finalizedWindow.end).toLocaleString() : "-"}
+              </p>
+              {activeRace?.timingAggregation === "multiple" && (
+                <p>
+                  Al finalizar cada jornada podrás sumar tiempos o puntos de las instancias o días completados.
+                </p>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2 md:justify-end">
               <Button
-                type="button"
-                variant={isLocked ? "default" : "outline"}
-                size="sm"
-                onClick={() => setIsLocked((value) => !value)}
-                className="flex items-center gap-2"
+                variant="secondary"
+                onClick={() => {
+                  if (hasAggregationOptions) {
+                    setFinalizeDialogOpen(true);
+                  } else {
+                    handleFinalizeRace();
+                  }
+                }}
+                disabled={startingGroupKey !== null || isFinalizing}
               >
-                {isLocked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
-                <span className="text-xs font-semibold uppercase">
-                  {isLocked ? "Bloqueado" : "Desbloqueado"}
-                </span>
+                Finalizar carrera
               </Button>
-            )}
-          </div>
-          <CardDescription>Elige cómo quieres administrar los cronómetros de la carrera.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <RadioGroup value={mode} onValueChange={(value) => setMode(value as TimingMode)} className="grid gap-4 md:grid-cols-3">
-            {modeOptions.map((option) => (
-              <Label
-                key={option.value}
-                htmlFor={`mode-${option.value}`}
-                className={cn(
-                  "flex cursor-pointer flex-col gap-2 rounded-md border p-4",
-                  mode === option.value ? "border-primary" : "border-muted"
-                )}
-              >
-                <RadioGroupItem value={option.value} id={`mode-${option.value}`} className="sr-only" />
-                <span className="text-sm font-medium">{option.label}</span>
-                <span className="text-sm text-muted-foreground">
-                  {option.value === "general" && "Un único disparo de largada para todos los participantes."}
-                  {option.value === "distance" && "Cada distancia tiene su propio cronómetro."}
-                  {option.value === "category" && "Cada categoría larga de manera independiente."}
-                </span>
-              </Label>
-            ))}
-          </RadioGroup>
-        </CardContent>
-      </Card>
+              <Button variant="destructive" onClick={handleResetRace} disabled={startingGroupKey !== null}>
+                Resetear datos y cronómetros
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {groups.length === 0 && (
-          <div className="col-span-full text-center text-sm text-muted-foreground">
-            Aún no hay participantes para cronometrar.
-          </div>
-        )}
-        {groups.map((group) => (
-          <Card key={group.key}>
-            <CardHeader>
-              <CardTitle className="text-base">{group.label}</CardTitle>
-              <CardDescription>
-                {group.participantCount} participantes · {group.finishedCount} llegados
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex items-center justify-between gap-4">
+      {canControlTiming && (
+        <Card>
+          <CardHeader>
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <CardTitle>Modo de largada</CardTitle>
+              {isAdmin && (
+                <Button
+                  type="button"
+                  variant={isLocked ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setIsLocked((value) => !value)}
+                  className="flex items-center gap-2"
+                >
+                  {isLocked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
+                  <span className="text-xs font-semibold uppercase">
+                    {isLocked ? "Bloqueado" : "Desbloqueado"}
+                  </span>
+                </Button>
+              )}
+            </div>
+            <CardDescription>Elige cómo quieres administrar los cronómetros de la carrera.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <RadioGroup
+              value={mode}
+              onValueChange={(value) => setMode(value as TimingMode)}
+              className="grid gap-4 md:grid-cols-3"
+            >
+              {modeOptions.map((option) => (
+                <Label
+                  key={option.value}
+                  htmlFor={`mode-${option.value}`}
+                  className={cn(
+                    "flex cursor-pointer flex-col gap-2 rounded-md border p-4",
+                    mode === option.value ? "border-primary" : "border-muted"
+                  )}
+                >
+                  <RadioGroupItem value={option.value} id={`mode-${option.value}`} className="sr-only" />
+                  <span className="text-sm font-medium">{option.label}</span>
+                  <span className="text-sm text-muted-foreground">
+                    {option.value === "general" && "Un único disparo de largada para todos los participantes."}
+                    {option.value === "distance" && "Cada distancia tiene su propio cronómetro."}
+                    {option.value === "category" && "Cada categoría larga de manera independiente."}
+                  </span>
+                </Label>
+              ))}
+            </RadioGroup>
+          </CardContent>
+        </Card>
+      )}
+
+      {canControlTiming && (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {groups.length === 0 && (
+            <div className="col-span-full text-center text-sm text-muted-foreground">
+              Aún no hay participantes para cronometrar.
+            </div>
+          )}
+          {groups.map((group) => (
+            <Card key={group.key}>
+              <CardHeader>
+                <CardTitle className="text-base">{group.label}</CardTitle>
+                <CardDescription>
+                  {group.participantCount} participantes · {group.finishedCount} llegados
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex items-center justify-between gap-4">
               <div>
                 <p className="text-xs uppercase text-muted-foreground">Cronómetro</p>
                 <p className="font-mono text-3xl">
                   {group.startTime
                     ? formatElapsedTime(
-                        Math.max(
-                          0,
-                          (stoppedGroups[group.key]?.pausedAt ?? now) - group.startTime
-                        )
+                        isRaceFinalized
+                          ? 0
+                          : Math.max(
+                              0,
+                              (stoppedGroups[group.key]?.pausedAt ?? now) - group.startTime
+                            )
                       )
                     : emptyTime}
                 </p>
               </div>
-              {isAdmin && (
+              {canControlTiming && (
                 <Button
                   onClick={() => {
                     if (!group.startTime) {
                       handleStartGroup(group);
                     } else if (stoppedGroups[group.key]) {
-                      handleResetGroup(group);
+                      if (isAdmin) {
+                        handleResetGroup(group);
+                      } else {
+                        setStoppedGroups((prev) => {
+                          const next = { ...prev };
+                          delete next[group.key];
+                          return next;
+                        });
+                      }
                     } else {
                       handleStopGroup(group);
                     }
                   }}
-                  disabled={startingGroupKey === group.key || isLocked}
+                  disabled={startingGroupKey === group.key || isLocked || isRaceFinalized}
                   variant={
                     !group.startTime
                       ? "default"
                       : stoppedGroups[group.key]
-                      ? "destructive"
+                      ? isAdmin
+                        ? "destructive"
+                        : "secondary"
                       : "outline"
                   }
                 >
                   {group.startTime
                     ? stoppedGroups[group.key]
-                      ? "Resetear"
+                      ? isAdmin
+                        ? "Resetear"
+                        : "Reanudar"
                       : "Detener"
                     : "Iniciar"}
                 </Button>
@@ -905,8 +1500,9 @@ export function TimingDashboard({
           </Card>
         ))}
       </div>
+      )}
 
-      {isAdmin && (
+      {canControlTiming && (
         <Card>
           <CardHeader>
             <CardTitle>Registro manual de llegadas</CardTitle>
@@ -916,10 +1512,16 @@ export function TimingDashboard({
             <form onSubmit={handleManualCapture} className="flex flex-col gap-4 md:flex-row">
               <div className="flex-1 space-y-2">
                 <Label htmlFor="manual-bib">Número de dorsal</Label>
-                <Input id="manual-bib" value={manualBib} onChange={(event) => setManualBib(event.target.value)} placeholder="Ej: 152" />
+                <Input
+                  id="manual-bib"
+                  value={manualBib}
+                  onChange={(event) => setManualBib(event.target.value)}
+                  placeholder="Ej: 152"
+                  disabled={!canControlTiming}
+                />
               </div>
               <div className="flex items-end">
-                <Button type="submit" disabled={isSavingManual} className="w-full md:w-auto">
+                <Button type="submit" disabled={isSavingManual || !canControlTiming} className="w-full md:w-auto">
                   Registrar llegada
                 </Button>
               </div>
@@ -928,6 +1530,25 @@ export function TimingDashboard({
         </Card>
       )}
 
+      {!isAdmin && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Clasificación en vivo</CardTitle>
+            <CardDescription>Elige la vista deseada para los resultados.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Tabs value={viewerTab} onValueChange={(value) => setViewerTab(value as "general" | "categories" | "special")}>
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="general">General</TabsTrigger>
+                <TabsTrigger value="categories">Categorías</TabsTrigger>
+                <TabsTrigger value="special">Especial</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </CardContent>
+        </Card>
+      )}
+
+      {showGeneralSections && (
       <Card>
         <CardHeader>
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
@@ -958,9 +1579,11 @@ export function TimingDashboard({
                     <TableHead>#</TableHead>
                     <TableHead>Dorsal</TableHead>
                     <TableHead>Nombre</TableHead>
+                    <TableHead>Especial</TableHead>
                     <TableHead className="hidden md:table-cell">Categoría</TableHead>
                     <TableHead>Distancia</TableHead>
-                    <TableHead>Tiempo</TableHead>
+                    <TableHead>{resultColumnLabel}</TableHead>
+                    {showTotalColumn && <TableHead>{totalColumnLabel}</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -969,6 +1592,13 @@ export function TimingDashboard({
                       <TableCell className="font-semibold">{index + 1}</TableCell>
                       <TableCell className="font-semibold">{arrival.displayBib}</TableCell>
                       <TableCell>{`${arrival.name} ${arrival.surname}`}</TableCell>
+                      <TableCell>
+                        {participantMapById[arrival.participantId]?.isSpecial ? (
+                          <Badge variant="secondary">Especial</Badge>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
                       <TableCell className="hidden md:table-cell">
                         {arrival.categoryId ? (
                           <Badge variant="secondary">{categoriesMap[arrival.categoryId] || "Sin categoría"}</Badge>
@@ -978,8 +1608,17 @@ export function TimingDashboard({
                       </TableCell>
                       <TableCell>{arrival.distance}</TableCell>
                       <TableCell className="font-mono">
-                        {formatElapsedTime(arrival.finishTime - arrival.startTime)}
+                        {renderResultValue(arrival)}
                       </TableCell>
+                      {showTotalColumn && (
+                        <TableCell className="font-mono">
+                          {aggregationSelectionActive && isPointsAggregation
+                            ? renderResultValue(arrival)
+                            : arrival.totalTime
+                            ? formatElapsedTime(arrival.totalTime)
+                            : "-"}
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -988,7 +1627,9 @@ export function TimingDashboard({
           )}
         </CardContent>
       </Card>
+      )}
 
+      {showCategorySections && (
       <Card>
         <CardHeader>
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
@@ -1026,7 +1667,8 @@ export function TimingDashboard({
                           <TableHead>#</TableHead>
                           <TableHead>Dorsal</TableHead>
                           <TableHead>Nombre</TableHead>
-                          <TableHead>Tiempo</TableHead>
+                          <TableHead>Especial</TableHead>
+                          <TableHead>{resultColumnLabel}</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1035,8 +1677,15 @@ export function TimingDashboard({
                             <TableCell className="font-semibold">{index + 1}</TableCell>
                             <TableCell className="font-semibold">{arrival.displayBib}</TableCell>
                             <TableCell>{`${arrival.name} ${arrival.surname}`}</TableCell>
+                            <TableCell>
+                              {participantMapById[arrival.participantId]?.isSpecial ? (
+                                <Badge variant="secondary">Especial</Badge>
+                              ) : (
+                                <span className="text-muted-foreground">-</span>
+                              )}
+                            </TableCell>
                             <TableCell className="font-mono">
-                              {formatElapsedTime(arrival.finishTime - arrival.startTime)}
+                              {renderResultValue(arrival)}
                             </TableCell>
                           </TableRow>
                         ))}
@@ -1049,7 +1698,9 @@ export function TimingDashboard({
           )}
         </CardContent>
       </Card>
+      )}
 
+      {showGeneralSections && (
       <Card>
         <CardHeader>
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
@@ -1087,9 +1738,10 @@ export function TimingDashboard({
                           <TableHead>#</TableHead>
                           <TableHead>Dorsal</TableHead>
                           <TableHead>Nombre</TableHead>
+                          <TableHead>Especial</TableHead>
                           <TableHead className="hidden md:table-cell">Categoría</TableHead>
                           <TableHead>Distancia</TableHead>
-                          <TableHead>Tiempo</TableHead>
+                          <TableHead>{resultColumnLabel}</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1098,6 +1750,13 @@ export function TimingDashboard({
                             <TableCell className="font-semibold">{index + 1}</TableCell>
                             <TableCell className="font-semibold">{arrival.displayBib}</TableCell>
                             <TableCell>{`${arrival.name} ${arrival.surname}`}</TableCell>
+                            <TableCell>
+                              {participantMapById[arrival.participantId]?.isSpecial ? (
+                                <Badge variant="secondary">Especial</Badge>
+                              ) : (
+                                <span className="text-muted-foreground">-</span>
+                              )}
+                            </TableCell>
                             <TableCell className="hidden md:table-cell">
                               {arrival.categoryId ? (
                                 <Badge variant="secondary">{categoriesMap[arrival.categoryId] || "Sin categoría"}</Badge>
@@ -1107,7 +1766,7 @@ export function TimingDashboard({
                             </TableCell>
                             <TableCell>{arrival.distance}</TableCell>
                             <TableCell className="font-mono">
-                              {formatElapsedTime(arrival.finishTime - arrival.startTime)}
+                              {renderResultValue(arrival)}
                             </TableCell>
                           </TableRow>
                         ))}
@@ -1120,6 +1779,286 @@ export function TimingDashboard({
           )}
         </CardContent>
       </Card>
+      )}
+
+      {showSpecialSections && (
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <CardTitle>Clasificaciones para corredores especiales</CardTitle>
+              <CardDescription>
+                Se muestran con detalle en cada clasificación y en apartados exclusivos.
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {specialFinishers.length === 0 && categorySpecialArrivals.length === 0 && genderSpecialArrivals.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Aún no hay corredores especiales en el cronometraje.</p>
+          ) : (
+            <>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-semibold">General especiales</h4>
+                  <Badge variant="secondary">{specialFinishers.length}</Badge>
+                </div>
+                {specialFinishers.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Sin llegadas especiales registradas.</p>
+                ) : (
+                  <div className="overflow-x-auto rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>#</TableHead>
+                          <TableHead>Dorsal</TableHead>
+                          <TableHead>Nombre</TableHead>
+                          <TableHead className="hidden md:table-cell">Categoría</TableHead>
+                          <TableHead>Distancia</TableHead>
+                          <TableHead>{resultColumnLabel}</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {specialFinishers.map((arrival, index) => (
+                          <TableRow key={`special-${arrival.id}`}>
+                            <TableCell className="font-semibold">{index + 1}</TableCell>
+                            <TableCell className="font-semibold">{arrival.displayBib}</TableCell>
+                            <TableCell className="flex items-center gap-2">
+                              {`${arrival.name} ${arrival.surname}`}
+                              <Badge variant="secondary">Especial</Badge>
+                            </TableCell>
+                            <TableCell className="hidden md:table-cell">
+                              {arrival.categoryId ? (
+                                <Badge variant="secondary">{categoriesMap[arrival.categoryId] || "Sin categoría"}</Badge>
+                              ) : (
+                                <Badge variant="outline">Sin categoría</Badge>
+                              )}
+                            </TableCell>
+                            <TableCell>{arrival.distance}</TableCell>
+                            <TableCell className="font-mono">
+                              {renderResultValue(arrival)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-semibold">Especiales por categoría</h4>
+                  <Badge variant="secondary">{categorySpecialArrivals.length}</Badge>
+                </div>
+                {categorySpecialArrivals.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No hay corredores especiales clasificados por categoría.</p>
+                ) : (
+                  <div className="space-y-4">
+                    {categorySpecialArrivals.map((category) => (
+                      <div key={`special-cat-${category.key}`} className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <h5 className="font-semibold">{category.label}</h5>
+                          <Badge variant="secondary">{category.members.length}</Badge>
+                        </div>
+                        <div className="overflow-x-auto rounded-md border">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>#</TableHead>
+                                <TableHead>Dorsal</TableHead>
+                                <TableHead>Nombre</TableHead>
+                                <TableHead>{resultColumnLabel}</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {category.members.map((arrival, index) => (
+                                <TableRow key={`special-cat-${category.key}-${arrival.id}`}>
+                                  <TableCell className="font-semibold">{index + 1}</TableCell>
+                                  <TableCell className="font-semibold">{arrival.displayBib}</TableCell>
+                                  <TableCell className="flex items-center gap-2">
+                                    {`${arrival.name} ${arrival.surname}`}
+                                    <Badge variant="secondary">Especial</Badge>
+                                  </TableCell>
+                                  <TableCell className="font-mono">
+                                    {renderResultValue(arrival)}
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-semibold">Especiales por sexo</h4>
+                  <Badge variant="secondary">{genderSpecialArrivals.length}</Badge>
+                </div>
+                {genderSpecialArrivals.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No hay corredores especiales clasificados por sexo.</p>
+                ) : (
+                  <div className="space-y-4">
+                    {genderSpecialArrivals.map((gender) => (
+                      <div key={`special-gender-${gender.key}`} className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <h5 className="font-semibold">{gender.label}</h5>
+                          <Badge variant="secondary">{gender.members.length}</Badge>
+                        </div>
+                        <div className="overflow-x-auto rounded-md border">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>#</TableHead>
+                                <TableHead>Dorsal</TableHead>
+                                <TableHead>Nombre</TableHead>
+                                <TableHead className="hidden md:table-cell">Categoría</TableHead>
+                                <TableHead>Distancia</TableHead>
+                                <TableHead>{resultColumnLabel}</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {gender.members.map((arrival, index) => (
+                                <TableRow key={`special-gender-${gender.key}-${arrival.id}`}>
+                                  <TableCell className="font-semibold">{index + 1}</TableCell>
+                                  <TableCell className="font-semibold">{arrival.displayBib}</TableCell>
+                                  <TableCell className="flex items-center gap-2">
+                                    {`${arrival.name} ${arrival.surname}`}
+                                    <Badge variant="secondary">Especial</Badge>
+                                  </TableCell>
+                                  <TableCell className="hidden md:table-cell">
+                                    {arrival.categoryId ? (
+                                      <Badge variant="secondary">{categoriesMap[arrival.categoryId] || "Sin categoría"}</Badge>
+                                    ) : (
+                                      <Badge variant="outline">Sin categoría</Badge>
+                                    )}
+                                  </TableCell>
+                                  <TableCell>{arrival.distance}</TableCell>
+                                  <TableCell className="font-mono">
+                                    {renderResultValue(arrival)}
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+      )}
+
+      <Dialog open={finalizeDialogOpen} onOpenChange={setFinalizeDialogOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Finalizar carrera y consolidar resultados</DialogTitle>
+            <DialogDescription>
+              Elige qué etapas o jornadas sumar y si consolidar por tiempos o puntos antes de cerrar la carrera.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Modo de consolidación</Label>
+              <RadioGroup
+                value={finalizeAggregationMode}
+                onValueChange={(value) => setFinalizeAggregationMode(value as "time" | "points")}
+                className="grid grid-cols-2 gap-2"
+              >
+                <Label
+                  className={cn(
+                    "flex cursor-pointer items-center gap-2 rounded-md border p-3",
+                    finalizeAggregationMode === "time" && "border-primary"
+                  )}
+                >
+                  <RadioGroupItem value="time" />
+                  Sumar tiempos
+                </Label>
+                <Label
+                  className={cn(
+                    "flex cursor-pointer items-center gap-2 rounded-md border p-3",
+                    finalizeAggregationMode === "points" && "border-primary"
+                  )}
+                >
+                  <RadioGroupItem value="points" />
+                  Sumar puntos
+                </Label>
+              </RadioGroup>
+            </div>
+
+            {raceInstances.length > 0 && (
+              <div className="space-y-2">
+                <Label>Etapas/instancias a sumar</Label>
+                <div className="grid gap-2 md:grid-cols-2">
+                  {raceInstances.map((instance) => (
+                    <Label key={instance.id} className="flex items-center gap-2">
+                      <Checkbox
+                        checked={selectedAggregationInstances.includes(instance.id)}
+                        onCheckedChange={(checked) => {
+                          setSelectedAggregationInstances((current) =>
+                            checked
+                              ? Array.from(new Set([...current, instance.id]))
+                              : current.filter((value) => value !== instance.id)
+                          );
+                        }}
+                      />
+                      {instance.name || "Instancia"}
+                    </Label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {activeRace?.sessions && activeRace.sessions.length > 0 && (
+              <div className="space-y-2">
+                <Label>Jornadas/días a sumar</Label>
+                <div className="grid gap-2 md:grid-cols-2">
+                  {activeRace.sessions.map((session) => (
+                    <Label key={session.id} className="flex items-center gap-2">
+                      <Checkbox
+                        checked={selectedAggregationSessions.includes(session.id)}
+                        onCheckedChange={(checked) => {
+                          setSelectedAggregationSessions((current) =>
+                            checked
+                              ? Array.from(new Set([...current, session.id]))
+                              : current.filter((value) => value !== session.id)
+                          );
+                        }}
+                      />
+                      {session.label || new Date(session.startTime).toLocaleString()}
+                    </Label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setFinalizeDialogOpen(false)} disabled={isFinalizing}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() =>
+                handleFinalizeRace({
+                  aggregateBy: finalizeAggregationMode,
+                  instanceIds: selectedAggregationInstances,
+                  sessionIds: selectedAggregationSessions,
+                })
+              }
+              disabled={isFinalizing}
+            >
+              Consolidar y finalizar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

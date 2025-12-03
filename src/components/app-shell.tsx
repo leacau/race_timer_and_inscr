@@ -12,28 +12,15 @@ import {
   SidebarInset,
   SidebarTrigger,
   useSidebar,
-  SidebarProvider,
 } from "@/components/ui/sidebar";
-import {
-  Users,
-  Timer,
-  Settings,
-  Shield,
-  Eye,
-  LogOut,
-  LayoutGrid,
-  CalendarIcon,
-} from "lucide-react";
+import { Settings, LogOut, LayoutGrid, CalendarIcon, Shield } from "lucide-react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { RaceTimerProLogo } from "./icons";
 import { Button } from "./ui/button";
-import { Label } from "./ui/label";
-import { Switch } from "./ui/switch";
 import { Separator } from "./ui/separator";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import { AppContext } from "@/context/app-context";
-import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -43,36 +30,25 @@ import {
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { Toaster } from "./ui/toaster";
-import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
-import { Calendar } from "./ui/calendar";
-import { format } from "date-fns";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "./ui/select";
+import { Badge } from "./ui/badge";
 
-const navItems = [
-  { href: "/", icon: Timer, label: "Cronometraje" },
-  { href: "/competitors", icon: Users, label: "Competidores" },
-  { href: "/categories", icon: LayoutGrid, label: "Categorías" },
+const baseNavItems = [
+  { href: "/", icon: LayoutGrid, label: "Dashboard" },
   { href: "/races", icon: CalendarIcon, label: "Carreras" },
 ];
 
 function AppHeader() {
-  const { role, setRole, raceDate, setRaceDate, ageCalculationMethod, setAgeCalculationMethod } = React.useContext(AppContext);
+  const { role, user, signOut } = React.useContext(AppContext);
   const { isMobile } = useSidebar();
 
   const pageTitles: { [key: string]: string } = {
-    "/": "Cronometraje",
-    "/competitors": "Gestión de Competidores",
-    "/categories": "Administrar Categorías",
+    "/": "Dashboard",
     "/races": "Carreras",
   };
   const pathname = usePathname();
-  const title = pageTitles[pathname] ?? "Panel";
+  const title = pathname.startsWith("/races/")
+    ? "Detalle de carrera"
+    : pageTitles[pathname] ?? "Panel";
 
   return (
     <header className="flex h-16 items-center justify-between gap-4 border-b bg-card px-4 md:px-6">
@@ -81,63 +57,9 @@ function AppHeader() {
         <h1 className="text-lg font-semibold tracking-tight">{title}</h1>
       </div>
       <div className="flex items-center gap-4">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm">
-              <Settings className="mr-2 h-4 w-4" />
-              <span>Ajustes de Carrera</span>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-80 p-4">
-            <div className="space-y-4">
-              <div>
-                  <Label>Fecha de la Carrera</Label>
-                  <Popover>
-                      <PopoverTrigger asChild>
-                          <Button
-                              variant={"outline"}
-                              className={cn("w-full justify-start text-left font-normal", !raceDate && "text-muted-foreground")}
-                          >
-                              <CalendarIcon className="mr-2 h-4 w-4" />
-                              {raceDate ? format(raceDate, "PPP") : <span>Elige una fecha</span>}
-                          </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0">
-                          <Calendar
-                              mode="single"
-                              selected={raceDate}
-                              onSelect={setRaceDate}
-                              initialFocus
-                          />
-                      </PopoverContent>
-                  </Popover>
-              </div>
-              <div>
-                  <Label>Calcular Edad Al</Label>
-                  <Select value={ageCalculationMethod} onValueChange={(value) => setAgeCalculationMethod(value as 'raceDay' | 'endOfYear')}>
-                      <SelectTrigger>
-                          <SelectValue placeholder="Método de cálculo" />
-                      </SelectTrigger>
-                      <SelectContent>
-                          <SelectItem value="raceDay">Día de la carrera</SelectItem>
-                          <SelectItem value="endOfYear">Final del año</SelectItem>
-                      </SelectContent>
-                  </Select>
-              </div>
-            </div>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
         <div className="flex items-center gap-2">
-          <Label htmlFor="role-switch" className="text-sm font-medium">
-            {role === "admin" ? "Administrador" : "Espectador"}
-          </Label>
-          <Switch
-            id="role-switch"
-            checked={role === "admin"}
-            onCheckedChange={(checked) => setRole(checked ? "admin" : "viewer")}
-            aria-label="Toggle admin mode"
-          />
+          <Badge variant={role === "admin" ? "default" : "outline"}>{role}</Badge>
+          {user?.email && <span className="text-sm text-muted-foreground">{user.email}</span>}
         </div>
         <Separator orientation="vertical" className="h-8" />
         <DropdownMenu>
@@ -155,7 +77,7 @@ function AppHeader() {
               <Settings className="mr-2 h-4 w-4" />
               <span>Configuración</span>
             </DropdownMenuItem>
-            <DropdownMenuItem>
+            <DropdownMenuItem onSelect={signOut}>
               <LogOut className="mr-2 h-4 w-4" />
               <span>Cerrar Sesión</span>
             </DropdownMenuItem>
@@ -168,53 +90,53 @@ function AppHeader() {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const [isClient, setIsClient] = React.useState(false);
-
-  React.useEffect(() => {
-    setIsClient(true);
-  }, []);
-
-  if (!isClient) {
-    return null; // or a loading skeleton
-  }
+  const { role } = React.useContext(AppContext);
   
+  const navItems = React.useMemo(() => {
+    const items = [...baseNavItems];
+    if (role === "admin") {
+      items.push({ href: "/admin/users", icon: Shield, label: "Usuarios" });
+    }
+    return items;
+  }, [role]);
+
   return (
-      <>
-        <Sidebar>
-          <SidebarHeader>
-            <div className="flex items-center gap-2">
-              <RaceTimerProLogo className="size-8" />
-              <span className="text-lg font-semibold text-sidebar-foreground">
-                RaceTimer Pro
-              </span>
-            </div>
-          </SidebarHeader>
-          <SidebarContent>
-            <SidebarMenu>
-              {navItems.map((item) => (
-                <SidebarMenuItem key={item.href}>
-                  <Link href={item.href}>
-                    <SidebarMenuButton
-                      isActive={pathname === item.href}
-                      tooltip={item.label}
-                    >
-                      <item.icon />
-                      <span>{item.label}</span>
-                    </SidebarMenuButton>
-                  </Link>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarContent>
-          <SidebarFooter>
-            {/* Footer content if any */}
-          </SidebarFooter>
-        </Sidebar>
-        <SidebarInset>
-          <AppHeader />
-          <main className="flex-1 overflow-y-auto p-4 md:p-6">{children}</main>
-        </SidebarInset>
-        <Toaster />
-      </>
+    <>
+      <Sidebar>
+        <SidebarHeader>
+          <div className="flex items-center gap-2">
+            <RaceTimerProLogo className="size-8" />
+            <span className="text-lg font-semibold text-sidebar-foreground">
+              RaceTimer Pro
+            </span>
+          </div>
+        </SidebarHeader>
+        <SidebarContent>
+          <SidebarMenu>
+            {navItems.map((item) => (
+              <SidebarMenuItem key={item.href}>
+                <Link href={item.href}>
+                  <SidebarMenuButton
+                    isActive={pathname === item.href}
+                    tooltip={item.label}
+                  >
+                    <item.icon />
+                    <span>{item.label}</span>
+                  </SidebarMenuButton>
+                </Link>
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
+        </SidebarContent>
+        <SidebarFooter>
+          {/* Footer content if any */}
+        </SidebarFooter>
+      </Sidebar>
+      <SidebarInset>
+        <AppHeader />
+        <main className="flex-1 overflow-y-auto p-4 md:p-6">{children}</main>
+      </SidebarInset>
+      <Toaster />
+    </>
   );
 }

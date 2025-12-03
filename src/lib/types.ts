@@ -1,6 +1,47 @@
 
 
+export type Role = "admin" | "client" | "timer" | "kit" | "visitor" | "unassigned";
 export type AgeCalculationMethod = 'raceDay' | 'endOfYear';
+
+export type RaceDiscipline =
+  | 'pedestrismo'
+  | 'duatlon'
+  | 'triatlon'
+  | 'trail'
+  | 'ciclismo'
+  | 'automovilismo'
+  | 'otra';
+
+export type RaceEvaluation = 'time' | 'points';
+export type RelayMeasurement = 'total' | 'perLeg';
+
+export type RaceInstance = {
+  id: string;
+  name: string;
+  includeInResult: boolean;
+};
+
+export type RaceSession = {
+  id: string;
+  label?: string;
+  startTime: number;
+  endTime: number;
+};
+
+export type InstanceTime = {
+  startTime: number | null;
+  finishTime: number | null;
+  points?: number | null;
+};
+
+export type Team = {
+  id: string;
+  raceId: string;
+  name: string;
+};
+
+export const SHIRT_SIZES = ["XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"] as const;
+export type ShirtSize = (typeof SHIRT_SIZES)[number];
 
 // Tipo de Participante como se lee de Firestore
 export type Participant = {
@@ -20,7 +61,17 @@ export type Participant = {
   city: string | null;
   province: string | null;
   country: string | null;
+  shirtSize?: ShirtSize | null;
   isSpecial: boolean;
+  kitDelivered?: boolean;
+  replacedFromId?: string | null;
+  replacedById?: string | null;
+  teamId?: string | null;
+  instanceTimes?: Record<string, InstanceTime>;
+  aggregatedType?: 'time' | 'points' | null;
+  aggregatedValue?: number | null;
+  aggregatedInstanceIds?: string[];
+  aggregatedSessionIds?: string[];
 };
 
 // Tipo para el formulario del cliente y la creación
@@ -35,7 +86,32 @@ export type ParticipantInput = {
   city?: string;
   province?: string;
   country?: string;
+  shirtSize?: ShirtSize | null;
   isSpecial?: boolean;
+  teamId?: string | null;
+};
+
+export type ParticipantSnapshot = Pick<
+  Participant,
+  | "id"
+  | "bibNumber"
+  | "chipNumber"
+  | "name"
+  | "surname"
+  | "dni"
+  | "gender"
+  | "distance"
+  | "birthDate"
+  | "categoryId"
+>;
+
+export type RunnerChange = {
+  id: string;
+  raceId: string;
+  participantId: string;
+  previous: ParticipantSnapshot;
+  next: ParticipantSnapshot;
+  createdAt: string;
 };
 
 // Tipo para escribir en Firestore, sin id de documento
@@ -57,6 +133,40 @@ export type Race = {
   id: string;
   name: string;
   eventDate: string; // YYYY-MM-DD
+  ageCalculationMethod: AgeCalculationMethod;
+  discipline: RaceDiscipline;
+  competitionMode: 'individual' | 'teams';
+  timingAggregation: 'single' | 'multiple';
+  evaluationMethod: RaceEvaluation;
+  scoringCriteria?: string;
+  autoScoringRules?: string;
+  isRelay: boolean;
+  relayMeasurement: RelayMeasurement;
+  isMultiStage: boolean;
+  includeInstancesInResult: boolean;
+  instances: RaceInstance[];
+  raceStartTime?: number | null;
+  raceEndTime?: number | null;
+  finalized?: boolean;
+  sessions?: RaceSession[];
+  finalAggregation?: {
+    aggregateBy: 'time' | 'points';
+    instanceIds: string[];
+    sessionIds: string[];
+  };
 };
 
-export type RaceInput = Omit<Race, 'id'>;
+export type RaceInput = Omit<
+  Race,
+  'id' | 'raceStartTime' | 'raceEndTime' | 'finalized' | 'sessions'
+>;
+
+export type UserProfile = {
+  id: string;
+  email: string;
+  displayName?: string | null;
+  role: Role;
+  entryType: "organization" | "visitor";
+  provider?: string;
+  createdAt?: unknown;
+};

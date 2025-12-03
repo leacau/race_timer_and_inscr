@@ -6,6 +6,7 @@ import {
     collection,
     getDocs,
     addDoc,
+    setDoc,
     updateDoc,
     deleteDoc,
     doc,
@@ -13,15 +14,48 @@ import {
     orderBy,
     writeBatch,
     where,
+    getDoc,
 } from "firebase/firestore";
-import type { Participant, Category, CategoryInput, ParticipantFirestoreData, Race, RaceInput } from "./types";
+import type {
+  Participant,
+  Category,
+  CategoryInput,
+  ParticipantFirestoreData,
+  Race,
+  RaceInput,
+  RunnerChange,
+  Team,
+  Role,
+  UserProfile,
+} from "./types";
+
+const normalizeRace = (data: Omit<Race, "id">): Omit<Race, "id"> => ({
+    ageCalculationMethod: data.ageCalculationMethod ?? "raceDay",
+    competitionMode: data.competitionMode ?? "individual",
+    evaluationMethod: data.evaluationMethod ?? "time",
+    timingAggregation: data.timingAggregation ?? "single",
+    discipline: data.discipline ?? "otra",
+    scoringCriteria: data.scoringCriteria ?? "",
+    autoScoringRules: data.autoScoringRules ?? "",
+    isRelay: data.isRelay ?? false,
+    relayMeasurement: data.relayMeasurement ?? "total",
+    isMultiStage: data.isMultiStage ?? false,
+    includeInstancesInResult: data.includeInstancesInResult ?? false,
+    instances: data.instances ?? [],
+    raceStartTime: data.raceStartTime ?? null,
+    raceEndTime: data.raceEndTime ?? null,
+    finalized: data.finalized ?? false,
+    sessions: data.sessions ?? [],
+    finalAggregation: data.finalAggregation ?? null,
+    name: data.name,
+    eventDate: data.eventDate,
+});
 
 export async function getParticipants(raceId?: string | null): Promise<Participant[]> {
     const participantsCol = collection(db, "participants");
-    const constraints = [orderBy("bibNumber")];
-    if (raceId) {
-        constraints.unshift(where("raceId", "==", raceId));
-    }
+    const constraints = raceId
+        ? [where("raceId", "==", raceId)]
+        : [orderBy("bibNumber")];
     const q = query(participantsCol, ...constraints);
     const participantSnapshot = await getDocs(q);
     const participantList = participantSnapshot.docs.map(doc => {
@@ -29,21 +63,40 @@ export async function getParticipants(raceId?: string | null): Promise<Participa
         return {
             id: doc.id,
             ...data,
+            shirtSize: data.shirtSize ?? null,
             isSpecial: data.isSpecial ?? false,
+            kitDelivered: data.kitDelivered ?? false,
+            replacedFromId: data.replacedFromId ?? null,
+            replacedById: data.replacedById ?? null,
+            teamId: data.teamId ?? null,
+            instanceTimes: data.instanceTimes ?? {},
+            aggregatedType: data.aggregatedType ?? null,
+            aggregatedValue: data.aggregatedValue ?? null,
+            aggregatedInstanceIds: data.aggregatedInstanceIds ?? [],
+            aggregatedSessionIds: data.aggregatedSessionIds ?? [],
         } satisfies Participant;
-    });
+  });
+
+    if (raceId) {
+        participantList.sort((a, b) => a.bibNumber - b.bibNumber);
+    }
+
     return participantList;
 }
 
 export async function getCategories(raceId?: string | null): Promise<Category[]> {
     const categoriesCol = collection(db, "categories");
-    const constraints = [orderBy("name")];
-    if (raceId) {
-        constraints.unshift(where("raceId", "==", raceId));
-    }
+    const constraints = raceId
+        ? [where("raceId", "==", raceId)]
+        : [orderBy("name")];
     const q = query(categoriesCol, ...constraints);
     const categorySnapshot = await getDocs(q);
     const categoryList = categorySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Category));
+
+    if (raceId) {
+        categoryList.sort((a, b) => a.name.localeCompare(b.name));
+    }
+
     return categoryList;
 }
 
@@ -57,13 +110,61 @@ export async function updateParticipant(id: string, data: Partial<ParticipantFir
     await updateDoc(participantRef, data);
 }
 
+export async function getParticipant(id: string): Promise<Participant | null> {
+    const participantRef = doc(db, "participants", id);
+    const snapshot = await getDoc(participantRef);
+    if (!snapshot.exists()) return null;
+    const data = snapshot.data() as ParticipantFirestoreData;
+    return {
+        id: snapshot.id,
+        ...data,
+        shirtSize: data.shirtSize ?? null,
+        isSpecial: data.isSpecial ?? false,
+        kitDelivered: data.kitDelivered ?? false,
+        replacedFromId: data.replacedFromId ?? null,
+        replacedById: data.replacedById ?? null,
+        teamId: data.teamId ?? null,
+    } satisfies Participant;
+}
+
 export async function deleteParticipant(id: string): Promise<void> {
     await deleteDoc(doc(db, "participants", id));
 }
 
-export async function updateParticipantTime(id: string, startTime: number, finishTime: number): Promise<void> {
+export async function updateParticipantTime(
+    id: string,
+    startTime: number,
+    finishTime: number,
+    instanceId?: string | null,
+    nextInstanceId?: string | null
+): Promise<void> {
     const participantRef = doc(db, "participants", id);
-    await updateDoc(participantRef, { startTime, finishTime });
+    if (!instanceId) {
+        await updateDoc(participantRef, { startTime, finishTime });
+        return;
+    }
+
+    const snapshot = await getDoc(participantRef);
+    const data = snapshot.data() as ParticipantFirestoreData | undefined;
+    const currentInstances = data?.instanceTimes ?? {};
+    const current = currentInstances[instanceId] ?? { startTime: null, finishTime: null };
+    const nextInstance = nextInstanceId ? currentInstances[nextInstanceId] ?? { startTime: null, finishTime: null } : null;
+
+    await updateDoc(participantRef, {
+        instanceTimes: {
+            ...currentInstances,
+            [instanceId]: { ...current, startTime, finishTime },
+            ...(nextInstanceId
+                ? {
+                    [nextInstanceId]: {
+                        ...nextInstance,
+                        startTime: nextInstance?.startTime ?? finishTime,
+                        finishTime: nextInstance?.finishTime ?? null,
+                    },
+                }
+                : {}),
+        },
+    });
 }
 
 export async function bulkDeleteParticipants(ids: string[]): Promise<void> {
@@ -132,12 +233,30 @@ export async function getRaces(): Promise<Race[]> {
     const racesCol = collection(db, "races");
     const q = query(racesCol, orderBy("eventDate", "desc"));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<Race, "id">) }));
+    return snapshot.docs.map((doc) => ({ id: doc.id, ...normalizeRace(doc.data() as Omit<Race, "id">) }));
 }
 
 export async function addRace(data: RaceInput): Promise<string> {
-    const docRef = await addDoc(collection(db, "races"), data);
+    const payload: Omit<Race, "id"> = {
+        ...data,
+        raceStartTime: null,
+        raceEndTime: null,
+        finalized: false,
+        sessions: [],
+    };
+    const docRef = await addDoc(collection(db, "races"), payload);
     return docRef.id;
+}
+
+export async function getRace(id: string): Promise<Race | null> {
+    const raceRef = doc(db, "races", id);
+    const snapshot = await getDoc(raceRef);
+
+    if (!snapshot.exists()) {
+        return null;
+    }
+
+    return { id: snapshot.id, ...normalizeRace(snapshot.data() as Omit<Race, "id">) };
 }
 
 export async function updateRace(id: string, data: RaceInput): Promise<void> {
@@ -145,7 +264,87 @@ export async function updateRace(id: string, data: RaceInput): Promise<void> {
     await updateDoc(raceRef, data);
 }
 
+export async function updateRaceFields(id: string, data: Partial<Omit<Race, "id">>): Promise<void> {
+    const raceRef = doc(db, "races", id);
+    await updateDoc(raceRef, data);
+}
+
 export async function deleteRace(id: string): Promise<void> {
     const raceRef = doc(db, "races", id);
     await deleteDoc(raceRef);
+}
+
+export async function addRunnerChange(change: Omit<RunnerChange, "id" | "createdAt"> & { createdAt?: string }) {
+    const docRef = await addDoc(collection(db, "runnerChanges"), {
+        ...change,
+        createdAt: change.createdAt ?? new Date().toISOString(),
+    });
+    return docRef.id;
+}
+
+export async function getRunnerChanges(raceId: string): Promise<RunnerChange[]> {
+    const changesCol = collection(db, "runnerChanges");
+    const q = query(changesCol, where("raceId", "==", raceId));
+    const snapshot = await getDocs(q);
+    const changes = snapshot.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<RunnerChange, "id">) }));
+
+    changes.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+
+    return changes;
+}
+
+export async function getTeams(raceId: string): Promise<Team[]> {
+    const teamsCol = collection(db, "teams");
+    const q = query(teamsCol, where("raceId", "==", raceId));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<Team, "id">) }));
+}
+
+export async function addTeam(team: Omit<Team, "id">): Promise<string> {
+    const docRef = await addDoc(collection(db, "teams"), team);
+    return docRef.id;
+}
+
+export async function updateTeam(id: string, data: Partial<Omit<Team, "id">>): Promise<void> {
+    const teamRef = doc(db, "teams", id);
+    await updateDoc(teamRef, data);
+}
+
+export async function deleteTeam(id: string): Promise<void> {
+    const teamRef = doc(db, "teams", id);
+    await deleteDoc(teamRef);
+}
+
+export async function getUsers(): Promise<UserProfile[]> {
+    const usersCol = collection(db, "users");
+    const snapshot = await getDocs(usersCol);
+    return snapshot.docs.map((doc) => {
+        const data = doc.data() as Omit<UserProfile, "id">;
+        return {
+            id: doc.id,
+            email: data.email,
+            displayName: data.displayName ?? "",
+            role: (data.role as Role) ?? "unassigned",
+            entryType: (data.entryType as UserProfile["entryType"]) ?? "organization",
+            provider: data.provider,
+            createdAt: data.createdAt,
+        } satisfies UserProfile;
+    });
+}
+
+export async function setUserRole(userId: string, role: Role): Promise<void> {
+    const userRef = doc(db, "users", userId);
+    await updateDoc(userRef, { role });
+}
+
+export async function ensureUserDocument(userId: string, data: Omit<UserProfile, "id">) {
+    const userRef = doc(db, "users", userId);
+    const snap = await getDoc(userRef);
+    if (!snap.exists()) {
+        await setDoc(userRef, data);
+    }
+}
+
+export async function saveVisitorEmail(email: string) {
+    await addDoc(collection(db, "visitors"), { email, createdAt: new Date().toISOString() });
 }
